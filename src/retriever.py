@@ -252,7 +252,8 @@ def hybrid_search(
 
 
 # =============================================================================
-# 검색 결과 후처리
+# 검색 결과 후처리 (Post-Retrieval Data Preparation)
+# 논문 Section 4.4.3: 토큰 절약을 위한 데이터 정제
 # =============================================================================
 
 def extract_raw_data(document: Document) -> Dict:
@@ -281,9 +282,9 @@ def prepare_context_for_llm(
     LLM 컨텍스트용 데이터를 준비합니다.
     
     논문 Section 4.4.3 (Post-Retrieval Data Preparation):
-    - 불필요한 데이터 제거
-    - 요청된 팀 데이터만 필터링
-    - 헤더 정보 제거로 토큰 절약
+    - clean_opponent: 요청된 팀 데이터만 필터링 (QRatio >= 60)
+    - clean_game: 헤더 정보 제거
+    - 'headers' 속성 제거로 약 600 토큰 절약
     
     Args:
         document: 검색된 Document
@@ -293,30 +294,38 @@ def prepare_context_for_llm(
         Dict: 정제된 컨텍스트 데이터
     """
     raw_data = extract_raw_data(document)
+    data_type = document.metadata.get("type")
     
-    # 불필요한 필드 제거
-    fields_to_remove = ["headers", "_source_file", "_loaded_at"]
-    for field in fields_to_remove:
-        raw_data.pop(field, None)
+    # =================================================================
+    # 논문 4.4.3: 'headers' 속성 제거 (약 600 토큰 절약)
+    # =================================================================
+    raw_data.pop("headers", None)
     
-    # 팀 필터링 (시즌 데이터에서 특정 팀만 추출)
-    if query_teams and document.metadata.get("type") == "season":
-        # 선수 데이터에서 요청된 팀 선수만 필터링
+    # =================================================================
+    # 논문 4.4.3: clean_opponent - 팀 필터링 (시즌 데이터)
+    # QRatio < 60인 선수 데이터 제거, >= 60인 경우 LLM이 최종 판단
+    # =================================================================
+    if data_type == "season" and query_teams:
+        from rapidfuzz import fuzz
+        
         if "players" in raw_data and isinstance(raw_data["players"], list):
-            from rapidfuzz import fuzz
-            
             filtered_players = []
             for player in raw_data["players"]:
                 player_team = player.get("team", "")
-                
-                # 팀명 매칭 검사
                 for query_team in query_teams:
+                    # QRatio >= 60: 유지 (LLM이 최종 판단)
+                    # QRatio < 60: 제거 (확실히 다른 팀)
                     if fuzz.QRatio(player_team.lower(), query_team.lower()) >= 60:
                         filtered_players.append(player)
                         break
-            
             raw_data["players"] = filtered_players
-            raw_data["_filtered_for_teams"] = query_teams
+        
+        raw_data["_filtered_for_teams"] = query_teams
+    
+    # =================================================================
+    # 논문 4.4.3: clean_game - 중복 헤더 정보 제거 (경기 데이터)
+    # =================================================================
+    # 헤더는 이미 위에서 제거됨
     
     return {
         "type": document.metadata.get("type"),
