@@ -1,0 +1,94 @@
+{
+  "season": "2025",
+  "team": "Hanwha",
+  "team_kr": "한화 이글스",
+  "last_updated": "2025-05-01",
+  "standings": {
+    "rank": 3,
+    "games_played": 30,
+    "wins": 18,
+    "losses": 11,
+    "ties": 1,
+    "win_rate": 0.621,
+    "games_behind": 2.5
+  },
+  "team_batting": {
+    "avg": 0.285,
+    "obp": 0.365,
+    "slg": 0.445,
+    "ops": 0.810,
+    "runs": 156,
+    "hits": 312,
+    "doubles": 45,
+    "triples": 8,
+    "home_runs": 28,
+    "rbi": 148,
+    "stolen_bases": 22,
+    "strikeouts": 198
+  },
+  "team_pitching": {
+    "era": 3.45,
+    "wins": 18,
+    "losses": 11,
+    "saves": 8,
+    "holds": 25,
+    "innings_pitched": 267.1,
+    "hits_allowed": 245,
+    "runs_allowed": 112,
+    "earned_runs": 102,
+    "home_runs_allowed": 18,
+    "walks": 85,
+    "strikeouts": 265,
+    "whip": 1.24
+  },
+  "top_hitters": [
+    {
+      "name": "노시환",
+      "position": "3B",
+      "avg": 0.325,
+      "hr": 12,
+      "rbi": 38,
+      "ops": 1.025
+    },
+    {
+      "name": "문현빈",
+      "position": "SS",
+      "avg": 0.298,
+      "hr": 5,
+      "rbi": 28,
+      "ops": 0.845
+    },
+    {
+      "name": "채은성",
+      "position": "OF",
+      "avg": 0.288,
+      "hr": 8,
+      "rbi": 32,
+      "ops": 0.878
+    }
+  ],
+  "top_pitchers": [
+    {
+      "name": "류현진",
+      "role": "SP",
+      "era": 2.85,
+      "wins": 5,
+      "losses": 1,
+      "strikeouts": 58
+    },
+    {
+      "name": "문동주",
+      "role": "SP",
+      "era": 3.12,
+      "wins": 4,
+      "losses": 2,
+      "strikeouts": 52
+    }
+  ],
+  "recent_form": {
+    "last_10": "7-3",
+    "streak": "W3",
+    "home_record": "10-4",
+    "away_record": "8-7"
+  }
+}

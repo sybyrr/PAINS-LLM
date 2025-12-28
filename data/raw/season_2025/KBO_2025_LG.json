@@ -1,0 +1,94 @@
+{
+  "season": "2025",
+  "team": "LG",
+  "team_kr": "LG 트윈스",
+  "last_updated": "2025-05-01",
+  "standings": {
+    "rank": 1,
+    "games_played": 30,
+    "wins": 20,
+    "losses": 9,
+    "ties": 1,
+    "win_rate": 0.690,
+    "games_behind": 0
+  },
+  "team_batting": {
+    "avg": 0.295,
+    "obp": 0.378,
+    "slg": 0.468,
+    "ops": 0.846,
+    "runs": 175,
+    "hits": 335,
+    "doubles": 52,
+    "triples": 6,
+    "home_runs": 35,
+    "rbi": 168,
+    "stolen_bases": 28,
+    "strikeouts": 175
+  },
+  "team_pitching": {
+    "era": 3.12,
+    "wins": 20,
+    "losses": 9,
+    "saves": 12,
+    "holds": 30,
+    "innings_pitched": 270.0,
+    "hits_allowed": 228,
+    "runs_allowed": 98,
+    "earned_runs": 94,
+    "home_runs_allowed": 15,
+    "walks": 72,
+    "strikeouts": 285,
+    "whip": 1.11
+  },
+  "top_hitters": [
+    {
+      "name": "오스틴",
+      "position": "1B",
+      "avg": 0.335,
+      "hr": 15,
+      "rbi": 45,
+      "ops": 1.085
+    },
+    {
+      "name": "박동원",
+      "position": "C",
+      "avg": 0.305,
+      "hr": 8,
+      "rbi": 32,
+      "ops": 0.895
+    },
+    {
+      "name": "문보경",
+      "position": "DH",
+      "avg": 0.292,
+      "hr": 10,
+      "rbi": 38,
+      "ops": 0.925
+    }
+  ],
+  "top_pitchers": [
+    {
+      "name": "엔스",
+      "role": "SP",
+      "era": 2.45,
+      "wins": 6,
+      "losses": 1,
+      "strikeouts": 65
+    },
+    {
+      "name": "케이시",
+      "role": "SP",
+      "era": 2.98,
+      "wins": 5,
+      "losses": 2,
+      "strikeouts": 58
+    }
+  ],
+  "recent_form": {
+    "last_10": "8-2",
+    "streak": "W5",
+    "home_record": "12-3",
+    "away_record": "8-6"
+  }
+}

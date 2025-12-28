@@ -1,0 +1,157 @@
+{
+  "match_id": "20250501_Hanwha_LG",
+  "date": "2025-05-01",
+  "stadium": "대전 한화생명 이글스파크",
+  "home_team": "Hanwha",
+  "away_team": "LG",
+  "home_team_kr": "한화 이글스",
+  "away_team_kr": "LG 트윈스",
+  "final_score": {
+    "home": 5,
+    "away": 3
+  },
+  "innings_score": {
+    "home": [0, 2, 0, 1, 0, 0, 2, 0, "X"],
+    "away": [1, 0, 0, 0, 2, 0, 0, 0, 0]
+  },
+  "winning_pitcher": {
+    "name": "류현진",
+    "team": "Hanwha",
+    "innings": 7.0,
+    "hits": 5,
+    "runs": 3,
+    "earned_runs": 3,
+    "walks": 1,
+    "strikeouts": 8,
+    "pitches": 98
+  },
+  "losing_pitcher": {
+    "name": "엔스",
+    "team": "LG",
+    "innings": 6.0,
+    "hits": 8,
+    "runs": 3,
+    "earned_runs": 3,
+    "walks": 2,
+    "strikeouts": 5,
+    "pitches": 92
+  },
+  "save_pitcher": {
+    "name": "박상원",
+    "team": "Hanwha",
+    "innings": 1.0,
+    "strikeouts": 2
+  },
+  "home_batting": [
+    {
+      "order": 1,
+      "name": "문현빈",
+      "position": "SS",
+      "ab": 4,
+      "runs": 1,
+      "hits": 2,
+      "rbi": 0,
+      "bb": 0,
+      "so": 1
+    },
+    {
+      "order": 2,
+      "name": "정은원",
+      "position": "2B",
+      "ab": 4,
+      "runs": 1,
+      "hits": 1,
+      "rbi": 1,
+      "bb": 0,
+      "so": 0
+    },
+    {
+      "order": 3,
+      "name": "노시환",
+      "position": "3B",
+      "ab": 4,
+      "runs": 2,
+      "hits": 3,
+      "rbi": 3,
+      "bb": 0,
+      "so": 0
+    },
+    {
+      "order": 4,
+      "name": "채은성",
+      "position": "RF",
+      "ab": 4,
+      "runs": 1,
+      "hits": 2,
+      "rbi": 1,
+      "bb": 0,
+      "so": 1
+    }
+  ],
+  "away_batting": [
+    {
+      "order": 1,
+      "name": "홍창기",
+      "position": "CF",
+      "ab": 4,
+      "runs": 1,
+      "hits": 1,
+      "rbi": 0,
+      "bb": 0,
+      "so": 1
+    },
+    {
+      "order": 2,
+      "name": "박동원",
+      "position": "C",
+      "ab": 4,
+      "runs": 0,
+      "hits": 1,
+      "rbi": 1,
+      "bb": 0,
+      "so": 0
+    },
+    {
+      "order": 3,
+      "name": "오스틴",
+      "position": "1B",
+      "ab": 4,
+      "runs": 1,
+      "hits": 2,
+      "rbi": 2,
+      "bb": 0,
+      "so": 1
+    },
+    {
+      "order": 4,
+      "name": "문보경",
+      "position": "DH",
+      "ab": 4,
+      "runs": 1,
+      "hits": 1,
+      "rbi": 0,
+      "bb": 0,
+      "so": 1
+    }
+  ],
+  "key_plays": [
+    {
+      "inning": 2,
+      "description": "노시환 2점 적시타, 한화 2-1 역전"
+    },
+    {
+      "inning": 5,
+      "description": "오스틴 2점 홈런, LG 3-3 동점"
+    },
+    {
+      "inning": 7,
+      "description": "노시환 결승 2루타, 한화 5-3 재역전"
+    }
+  ],
+  "game_summary": {
+    "attendance": 15234,
+    "game_time": "3:12",
+    "temperature": 22,
+    "weather": "맑음"
+  }
+}
