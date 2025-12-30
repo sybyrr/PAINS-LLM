@@ -376,7 +376,7 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
     
     Example:
         Season: "2025 Season batting statistics for Hanwha Eagles in KBO League"
-        Match: "Game record for Hanwha vs LG played on 2025-05-01"
+        Match: "Pitcher 류현진 from 한화 on 2024-03-23. Result: 패, IP: 3 2/3, ERA: 4.91"
     """
     if data_type == "season":
         # 시즌 데이터용 설명 문장
@@ -390,17 +390,32 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
         )
     
     elif data_type == "match":
-        # 경기 데이터용 설명 문장
-        teams = data.get("teams", [])
-        date = data.get("date", "Unknown date")
+        # 경기별 투수/타자 기록용 설명 문장
+        team = data.get("Team", "Unknown Team")
+        player_name = data.get("Name", "Unknown Player")
+        date = data.get("Date", data.get("date", "Unknown date"))
+        season_type = data.get("_season_type", "regular")
+        year = data.get("_year", "2024")
         
-        if len(teams) >= 2:
-            home_team, away_team = teams[0], teams[1]
+        # 투수 기록인 경우
+        if "ERA_game" in data:
+            result = data.get("Result", "")
+            ip = data.get("HLD", data.get("IP", ""))  # HLD 필드에 이닝 정보가 있음
+            era = data.get("ERA_game", "")
+            so = data.get("SO", 0)  # 삼진
+            
+            result_text = f", Result: {result}" if result else ""
+            
             return (
-                f"Game record for {home_team} vs {away_team} played on {date}. "
-                f"This dataset contains match statistics and individual player performance."
+                f"Pitcher {player_name} from {team} on {date} ({year} {season_type}). "
+                f"IP: {ip}, SO: {so}, ERA: {era}{result_text}. "
+                f"KBO baseball pitcher performance record."
             )
         else:
-            return f"Match data for {date}."
+            # 타자 기록인 경우 (향후 확장용)
+            return (
+                f"Batter {player_name} from {team} on {date} ({year} {season_type}). "
+                f"KBO baseball batter performance record."
+            )
     
     return "KBO Baseball data."

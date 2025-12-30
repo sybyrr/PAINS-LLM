@@ -1,34 +1,40 @@
 # =============================================================================
-# KBO Baseball Analytics Chatbot - Dependencies
+# KBO Baseball Analytics Chatbot - Optimized Dependencies
 # =============================================================================
 
-# LLM Framework
-langchain>=0.3.0
-langchain-openai>=0.2.0
-langchain-community>=0.3.0
-langchain-chroma>=0.1.0
+# 1. LLM Framework (LangChain 0.3.x)
+langchain==0.3.14
+langchain-openai==0.2.14
+langchain-community==0.3.14
+langchain-chroma==0.2.0        # ChromaDB 연동용 최신 패키지
 
-# OpenAI
-openai>=1.50.0
+# 2. OpenAI & Tokenizer
+openai==1.58.1
+tiktoken>=0.7.0                # [필수 추가] OpenAI 토큰 계산용
 
-# Vector Database
-chromadb>=0.5.0
+# 3. Vector Database
+chromadb==0.5.23
 
-# Embedding Model
-sentence-transformers>=3.0.0
-huggingface-hub>=0.25.0
+# 4. Data Processing & Analysis
+pandas>=2.2.0                  # [필수 추가] JSON->CSV 변환 및 데이터 핸들링
+numpy==1.26.4
+python-dotenv==1.0.1
+pydantic==2.10.3
 
-# String Matching
-rapidfuzz>=3.9.0
+# 5. Search & Retrieval (String Matching & Ensemble)
+rapidfuzz==3.11.0              # 정규화(Normalization) 핵심
+rank-bm25==0.2.2               # Hybrid Search (Fallback)용
 
-# Data Processing
-python-dotenv>=1.0.0
-pydantic>=2.0.0
+# 6. Utilities
+tqdm==4.67.1
 
-# Utilities
-tqdm>=4.66.0
-rank-bm25>=0.2.2
+# 7. Jupyter (개발 환경용)
+ipykernel==6.29.5
+ipywidgets==8.1.5
 
-# Jupyter Notebook
-ipykernel>=6.29.0
-ipywidgets>=8.1.0
+# 8. Embeddings & Model Inference
+sentence-transformers==3.3.1
+transformers==4.46.3
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1

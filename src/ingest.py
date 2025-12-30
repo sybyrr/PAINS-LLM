@@ -18,7 +18,7 @@ import re
 
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
-from langchain.schema import Document
+from langchain_core.documents import Document
 from tqdm import tqdm
 
 from .config import (
@@ -113,15 +113,26 @@ def load_season_data(data_dir: Path = None) -> List[Dict]:
 
 def load_match_data(data_dir: Path = None) -> List[Dict]:
     """
-    개별 경기 데이터(Match Dataset)를 로드합니다.
+    경기별 투수/타자 기록 데이터를 로드합니다.
     
-    파일명 예시: 20250501_Hanwha_vs_LG.json
+    현재 JSON 구조:
+    [
+      {
+        "dataset_id": "...",
+        "name": "...",
+        "headers": [...],
+        "data": [
+          { "Date": "2024-03-23", "Team": "한화", "Name": "류현진", ... },
+          ...
+        ]
+      }
+    ]
     
     Args:
         data_dir: 경기 데이터 디렉토리 경로
     
     Returns:
-        List[Dict]: 로드된 경기 데이터 목록
+        List[Dict]: 로드된 개별 경기 기록 목록
     """
     if data_dir is None:
         data_dir = MATCH_DATA_DIR
@@ -139,30 +150,48 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
     for json_file in json_files:
         try:
             with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                file_content = json.load(f)
             
-            # 메타데이터 추가
-            data["_source_file"] = json_file.name
-            data["_data_type"] = "match"
-            data["_loaded_at"] = datetime.now().isoformat()
-            
-            # 파일명에서 날짜/팀 정보 추출 (예: 20250501_Hanwha_vs_LG)
+            # 파일명에서 시즌 타입 추출 (예: 2024_regular_game, 2024_postseason_game)
             filename = json_file.stem
+            is_postseason = "postseason" in filename.lower()
+            season_type = "postseason" if is_postseason else "regular"
             
-            # 날짜 추출
-            date_match = re.search(r'(\d{8})', filename)
-            if date_match:
-                date_str = date_match.group(1)
-                formatted_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:]}"
-                data["date"] = formatted_date
+            # 연도 추출
+            year_match = re.search(r'(\d{4})', filename)
+            year = year_match.group(1) if year_match else "2024"
             
-            # 팀 추출 (vs 또는 _ 구분)
-            team_pattern = r'([A-Za-z]+)(?:_vs_|vs|_)([A-Za-z]+)'
-            team_match = re.search(team_pattern, filename, re.IGNORECASE)
-            if team_match:
-                data["teams"] = [team_match.group(1), team_match.group(2)]
-            
-            match_data.append(data)
+            # 배열 내 각 데이터셋 처리
+            if isinstance(file_content, list):
+                for dataset in file_content:
+                    dataset_name = dataset.get("name", "")
+                    dataset_id = dataset.get("dataset_id", "")
+                    
+                    # data 배열 내 각 레코드를 개별 문서로 처리
+                    records = dataset.get("data", [])
+                    print(f"   - {json_file.name}: {len(records)}개 레코드 발견")
+                    
+                    for record in records:
+                        # 개별 레코드에 메타데이터 추가
+                        record["_source_file"] = json_file.name
+                        record["_data_type"] = "match"
+                        record["_loaded_at"] = datetime.now().isoformat()
+                        record["_dataset_name"] = dataset_name
+                        record["_dataset_id"] = dataset_id
+                        record["_season_type"] = season_type
+                        record["_year"] = year
+                        
+                        # Date 필드가 있으면 date로 복사
+                        if "Date" in record:
+                            record["date"] = record["Date"]
+                        
+                        # Team 필드가 있으면 teams 리스트로 변환
+                        if "Team" in record:
+                            record["teams"] = [record["Team"]]
+                        
+                        match_data.append(record)
+            else:
+                print(f"⚠️ 예상치 못한 JSON 구조: {json_file.name}")
             
         except json.JSONDecodeError as e:
             print(f"❌ JSON 파싱 오류 ({json_file.name}): {e}")
@@ -217,13 +246,21 @@ def create_document_from_data(data: Dict, data_type: str) -> Document:
         if data.get("team"):
             metadata["teams"] = [data.get("team")]
     
-    # 경기 데이터 메타데이터
+    # 경기 데이터 메타데이터 (투수/타자 기록)
     elif data_type == "match":
-        metadata["date"] = data.get("date", "")
+        metadata["date"] = data.get("date", data.get("Date", ""))
         metadata["teams"] = data.get("teams", [])
-        if metadata["teams"]:
-            metadata["home_team"] = metadata["teams"][0] if len(metadata["teams"]) > 0 else ""
-            metadata["away_team"] = metadata["teams"][1] if len(metadata["teams"]) > 1 else ""
+        metadata["team"] = data.get("Team", "")
+        metadata["player_name"] = data.get("Name", "")
+        metadata["season_type"] = data.get("_season_type", "regular")
+        metadata["year"] = data.get("_year", "2024")
+        
+        # 투수 관련 필드
+        if "ERA_game" in data:
+            metadata["record_type"] = "pitcher"
+            metadata["result"] = data.get("Result", "")
+        else:
+            metadata["record_type"] = "batter"
     
     return Document(
         page_content=embedding_text,
