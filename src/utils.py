@@ -375,47 +375,70 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
         str: 임베딩용 설명 문장
     
     Example:
-        Season: "2025 Season batting statistics for Hanwha Eagles in KBO League"
-        Match: "Pitcher 류현진 from 한화 on 2024-03-23. Result: 패, IP: 3 2/3, ERA: 4.91"
+        Season: "2025 Regular season pitching stats for 류현진 (NC). ERA: 2.85, W: 12, L: 5"
+        Match: "Pitcher 구창모 from NC on 2025-10-06 (Post). Result: 승, IP: 6, ER: 1, SO: 5"
     """
     if data_type == "season":
-        # 시즌 데이터용 설명 문장
-        team = data.get("team", "Unknown Team")
+        # 시즌 데이터용 설명 문장 (선수별 누적 통계)
+        team = data.get("Team", data.get("team", "Unknown Team"))
         season = data.get("season", "2025")
-        stat_type = data.get("stat_type", "statistics")
+        season_type = data.get("_season_type", "Regular")
+        stat_type = data.get("_stat_type", "pitching")
+        player_name = data.get("Name", "Unknown Player")
         
-        return (
-            f"{season} Season {stat_type} for {team} in KBO League. "
-            f"This dataset contains cumulative season statistics and performance metrics."
-        )
+        # 투수 통계 주요 지표
+        if stat_type == "pitching":
+            era = data.get("ERA", "N/A")
+            wins = data.get("W", 0)
+            losses = data.get("L", 0)
+            ip = data.get("IP", 0)
+            so = data.get("SO", 0)
+            
+            return (
+                f"{season} {season_type} season pitching stats for {player_name} ({team}). "
+                f"ERA: {era}, W: {wins}, L: {losses}, IP: {ip}, SO: {so}. "
+                f"KBO baseball pitcher season statistics."
+            )
+        else:
+            # 타자 통계 (향후 확장)
+            avg = data.get("AVG", "N/A")
+            hr = data.get("HR", 0)
+            rbi = data.get("RBI", 0)
+            
+            return (
+                f"{season} {season_type} season batting stats for {player_name} ({team}). "
+                f"AVG: {avg}, HR: {hr}, RBI: {rbi}. "
+                f"KBO baseball batter season statistics."
+            )
     
     elif data_type == "match":
         # 경기별 투수/타자 기록용 설명 문장
         team = data.get("Team", "Unknown Team")
         player_name = data.get("Name", "Unknown Player")
         date = data.get("Date", data.get("date", "Unknown date"))
-        season_type = data.get("_season_type", "regular")
-        year = data.get("_year", "2024")
+        season_type = data.get("_season_type", "Regular")
+        year = data.get("_year", "2025")
+        record_type = data.get("_record_type", "pitcher")
         
-        # 투수 기록인 경우
-        if "ERA_game" in data:
+        if record_type == "pitcher":
             result = data.get("Result", "")
-            ip = data.get("HLD", data.get("IP", ""))  # HLD 필드에 이닝 정보가 있음
-            era = data.get("ERA_game", "")
-            so = data.get("SO", 0)  # 삼진
+            ip = data.get("IP", 0)
+            er = data.get("ER", 0)
+            so = data.get("SO", 0)
+            bb_hp = data.get("BB_HP", 0)
             
             result_text = f", Result: {result}" if result else ""
             
             return (
                 f"Pitcher {player_name} from {team} on {date} ({year} {season_type}). "
-                f"IP: {ip}, SO: {so}, ERA: {era}{result_text}. "
-                f"KBO baseball pitcher performance record."
+                f"IP: {ip}, ER: {er}, SO: {so}, BB+HP: {bb_hp}{result_text}. "
+                f"KBO baseball pitcher game performance record."
             )
         else:
             # 타자 기록인 경우 (향후 확장용)
             return (
                 f"Batter {player_name} from {team} on {date} ({year} {season_type}). "
-                f"KBO baseball batter performance record."
+                f"KBO baseball batter game performance record."
             )
     
     return "KBO Baseball data."

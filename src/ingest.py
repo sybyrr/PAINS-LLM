@@ -62,13 +62,25 @@ def load_season_data(data_dir: Path = None) -> List[Dict]:
     """
     시즌 누적 데이터(Global Dataset)를 로드합니다.
     
-    파일명 예시: KBO_2025_Season_Total.json, KBO_2025_Hanwha.json
+    현재 JSON 구조:
+    [
+      {
+        "dataset_id": "2025_REGULAR_PITCHING_STATS",
+        "name": "2025 Regular league Pitching Stats",
+        "type": "player",
+        "headers": [...],
+        "data": [
+          { "Rank": 1, "Name": "...", "Team": "...", "ERA": ..., ... },
+          ...
+        ]
+      }
+    ]
     
     Args:
         data_dir: 시즌 데이터 디렉토리 경로
     
     Returns:
-        List[Dict]: 로드된 시즌 데이터 목록
+        List[Dict]: 로드된 개별 선수 시즌 데이터 목록
     """
     if data_dir is None:
         data_dir = SEASON_DATA_DIR
@@ -86,22 +98,58 @@ def load_season_data(data_dir: Path = None) -> List[Dict]:
     for json_file in json_files:
         try:
             with open(json_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                file_content = json.load(f)
             
-            # 메타데이터 추가
-            data["_source_file"] = json_file.name
-            data["_data_type"] = "season"
-            data["_loaded_at"] = datetime.now().isoformat()
+            # 파일명에서 시즌 타입 추출 (예: 2025_POST_PITCHING_STATS)
+            filename = json_file.stem
+            is_postseason = "POST" in filename.upper()
+            season_type = "Post" if is_postseason else "Regular"
             
-            # 파일명에서 팀/시즌 정보 추출 시도
-            filename = json_file.stem  # 확장자 제외
+            # 연도 추출
+            year_match = re.search(r'(\d{4})', filename)
+            year = year_match.group(1) if year_match else "2025"
             
-            # 시즌 정보 추출 (예: KBO_2025_Hanwha)
-            season_match = re.search(r'(\d{4})', filename)
-            if season_match:
-                data["season"] = season_match.group(1)
+            # 통계 타입 추출 (PITCHING, BATTING 등)
+            stat_type = "pitching" if "PITCHING" in filename.upper() else "batting"
             
-            season_data.append(data)
+            # 배열 내 각 데이터셋 처리
+            if isinstance(file_content, list):
+                for dataset in file_content:
+                    dataset_name = dataset.get("name", "")
+                    dataset_id = dataset.get("dataset_id", "")
+                    
+                    # data 배열 내 각 레코드를 개별 문서로 처리
+                    records = dataset.get("data", [])
+                    print(f"   - {json_file.name}: {len(records)}개 선수 레코드 발견")
+                    
+                    for record in records:
+                        # 개별 레코드에 메타데이터 추가
+                        record["_source_file"] = json_file.name
+                        record["_data_type"] = "season"
+                        record["_loaded_at"] = datetime.now().isoformat()
+                        record["_dataset_name"] = dataset_name
+                        record["_dataset_id"] = dataset_id
+                        record["_season_type"] = season_type
+                        record["_stat_type"] = stat_type
+                        record["season"] = year
+                        
+                        # Team 필드가 있으면 team으로도 저장
+                        if "Team" in record:
+                            record["team"] = record["Team"]
+                            record["teams"] = [record["Team"]]
+                        
+                        season_data.append(record)
+            else:
+                # 단일 객체인 경우 기존 로직 유지
+                file_content["_source_file"] = json_file.name
+                file_content["_data_type"] = "season"
+                file_content["_loaded_at"] = datetime.now().isoformat()
+                
+                season_match = re.search(r'(\d{4})', filename)
+                if season_match:
+                    file_content["season"] = season_match.group(1)
+                
+                season_data.append(file_content)
             
         except json.JSONDecodeError as e:
             print(f"❌ JSON 파싱 오류 ({json_file.name}): {e}")
@@ -118,11 +166,12 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
     현재 JSON 구조:
     [
       {
-        "dataset_id": "...",
-        "name": "...",
+        "dataset_id": "2025_POST_MATCH_PITCHING_STATS",
+        "name": "2025 Post Match Pitching Data",
         "headers": [...],
         "data": [
-          { "Date": "2024-03-23", "Team": "한화", "Name": "류현진", ... },
+          { "Season": 2025, "Date": "2025-10-06", "Team": "NC", "Name": "구창모", 
+            "IP": 22, "ER": 1, "SO": 0, "Result": "승", ... },
           ...
         ]
       }
@@ -152,14 +201,18 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
             with open(json_file, "r", encoding="utf-8") as f:
                 file_content = json.load(f)
             
-            # 파일명에서 시즌 타입 추출 (예: 2024_regular_game, 2024_postseason_game)
-            filename = json_file.stem
-            is_postseason = "postseason" in filename.lower()
-            season_type = "postseason" if is_postseason else "regular"
+            # 파일명에서 시즌 타입 및 기록 타입 추출
+            filename = json_file.stem.upper()
+            is_postseason = "POST" in filename
+            season_type = "Post" if is_postseason else "Regular"
+            
+            # 투수/타자 기록 타입 추출
+            is_pitching = "PITCHING" in filename
+            record_type = "pitcher" if is_pitching else "batter"
             
             # 연도 추출
             year_match = re.search(r'(\d{4})', filename)
-            year = year_match.group(1) if year_match else "2024"
+            year = year_match.group(1) if year_match else "2025"
             
             # 배열 내 각 데이터셋 처리
             if isinstance(file_content, list):
@@ -179,6 +232,7 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
                         record["_dataset_name"] = dataset_name
                         record["_dataset_id"] = dataset_id
                         record["_season_type"] = season_type
+                        record["_record_type"] = record_type
                         record["_year"] = year
                         
                         # Date 필드가 있으면 date로 복사
@@ -240,11 +294,15 @@ def create_document_from_data(data: Dict, data_type: str) -> Document:
     # 시즌 데이터 메타데이터
     if data_type == "season":
         metadata["season"] = data.get("season", "2025")
-        metadata["team"] = data.get("team", "")
-        metadata["stat_type"] = data.get("stat_type", "")
+        metadata["team"] = data.get("Team", data.get("team", ""))
+        metadata["stat_type"] = data.get("_stat_type", "")
+        metadata["season_type"] = data.get("_season_type", "Regular")
+        metadata["player_name"] = data.get("Name", "")
         # teams 필드: 메타데이터 필터링용
-        if data.get("team"):
-            metadata["teams"] = [data.get("team")]
+        if data.get("teams"):
+            metadata["teams"] = data.get("teams")
+        elif data.get("Team"):
+            metadata["teams"] = [data.get("Team")]
     
     # 경기 데이터 메타데이터 (투수/타자 기록)
     elif data_type == "match":
@@ -252,15 +310,10 @@ def create_document_from_data(data: Dict, data_type: str) -> Document:
         metadata["teams"] = data.get("teams", [])
         metadata["team"] = data.get("Team", "")
         metadata["player_name"] = data.get("Name", "")
-        metadata["season_type"] = data.get("_season_type", "regular")
-        metadata["year"] = data.get("_year", "2024")
-        
-        # 투수 관련 필드
-        if "ERA_game" in data:
-            metadata["record_type"] = "pitcher"
-            metadata["result"] = data.get("Result", "")
-        else:
-            metadata["record_type"] = "batter"
+        metadata["season_type"] = data.get("_season_type", "Regular")
+        metadata["year"] = data.get("_year", "2025")
+        metadata["record_type"] = data.get("_record_type", "pitcher")
+        metadata["result"] = data.get("Result", "")
     
     return Document(
         page_content=embedding_text,
@@ -301,15 +354,21 @@ def prepare_documents(season_data: List[Dict], match_data: List[Dict]) -> List[D
 def initialize_vector_store(
     documents: List[Document] = None,
     persist_directory: str = None,
-    collection_name: str = None
+    collection_name: str = None,
+    batch_size: int = 100
 ) -> Chroma:
     """
     ChromaDB 벡터 스토어를 초기화하거나 기존 스토어를 로드합니다.
+    
+    성능 최적화:
+    - 배치 단위로 문서를 처리하여 메모리 효율성 향상
+    - tqdm으로 진행 상황 표시
     
     Args:
         documents: 적재할 Document 목록 (None이면 기존 스토어 로드)
         persist_directory: 영구 저장 디렉토리
         collection_name: 컬렉션 이름
+        batch_size: 한 번에 처리할 문서 수 (기본값: 100)
     
     Returns:
         Chroma: 초기화된 벡터 스토어
@@ -326,13 +385,26 @@ def initialize_vector_store(
     if documents:
         # 새로운 문서로 벡터 스토어 생성
         print(f"\n📦 ChromaDB 초기화 중... (문서 수: {len(documents)})")
+        print(f"   배치 크기: {batch_size}개씩 처리")
         
+        # 첫 번째 배치로 벡터 스토어 생성
+        first_batch = documents[:batch_size]
         vector_store = Chroma.from_documents(
-            documents=documents,
+            documents=first_batch,
             embedding=embeddings,
             collection_name=collection_name,
             persist_directory=persist_directory
         )
+        
+        # 나머지 배치를 순차적으로 추가
+        remaining_docs = documents[batch_size:]
+        if remaining_docs:
+            total_batches = (len(remaining_docs) + batch_size - 1) // batch_size
+            print(f"\n🔄 임베딩 생성 및 적재 중... ({total_batches}개 배치)")
+            
+            for i in tqdm(range(0, len(remaining_docs), batch_size), desc="Batches"):
+                batch = remaining_docs[i:i + batch_size]
+                vector_store.add_documents(batch)
         
         print(f"✅ ChromaDB 적재 완료: {persist_directory}")
         
