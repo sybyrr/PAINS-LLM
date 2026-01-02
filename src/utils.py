@@ -412,33 +412,59 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
             )
     
     elif data_type == "match":
-        # 경기별 투수/타자 기록용 설명 문장
+        # 경기별 투수/타자 기록용 설명 문장 (날짜+팀으로 그룹화된 데이터)
         team = data.get("Team", "Unknown Team")
-        player_name = data.get("Name", "Unknown Player")
         date = data.get("Date", data.get("date", "Unknown date"))
         season_type = data.get("_season_type", "Regular")
         year = data.get("_year", "2025")
         record_type = data.get("_record_type", "pitcher")
+        players = data.get("players", [])
         
         if record_type == "pitcher":
-            result = data.get("Result", "")
-            ip = data.get("IP", 0)
-            er = data.get("ER", 0)
-            so = data.get("SO", 0)
-            bb_hp = data.get("BB_HP", 0)
+            # 투수 기록 요약 생성
+            player_summaries = []
+            total_ip = 0
+            total_er = 0
+            total_so = 0
+            game_result = None
             
-            result_text = f", Result: {result}" if result else ""
+            for p in players:
+                name = p.get("Name", "Unknown")
+                result = p.get("Result", "")
+                ip = p.get("IP", 0)
+                er = p.get("ER", 0)
+                so = p.get("SO", 0)
+                
+                total_ip += ip if isinstance(ip, (int, float)) else 0
+                total_er += er if isinstance(er, (int, float)) else 0
+                total_so += so if isinstance(so, (int, float)) else 0
+                
+                # 경기 결과 (승/패/세이브 등) 추출
+                if result in ["승", "패", "세", "홀드"]:
+                    player_summaries.append(f"{name}({result})")
+                    if result in ["승", "패"]:
+                        game_result = result
+                else:
+                    player_summaries.append(name)
+            
+            players_text = ", ".join(player_summaries) if player_summaries else "No pitchers"
+            result_text = f" Game result: {game_result}." if game_result else ""
             
             return (
-                f"Pitcher {player_name} from {team} on {date} ({year} {season_type}). "
-                f"IP: {ip}, ER: {er}, SO: {so}, BB+HP: {bb_hp}{result_text}. "
-                f"KBO baseball pitcher game performance record."
+                f"{team} pitching data on {date} ({year} {season_type}).{result_text} "
+                f"Pitchers: {players_text}. "
+                f"Team totals - IP: {total_ip}, ER: {total_er}, SO: {total_so}. "
+                f"KBO baseball team pitching game record."
             )
         else:
             # 타자 기록인 경우 (향후 확장용)
+            player_names = [p.get("Name", "Unknown") for p in players]
+            players_text = ", ".join(player_names) if player_names else "No batters"
+            
             return (
-                f"Batter {player_name} from {team} on {date} ({year} {season_type}). "
-                f"KBO baseball batter game performance record."
+                f"{team} batting lineup on {date} ({year} {season_type}). "
+                f"Batters: {players_text}. "
+                f"KBO baseball team batting game record."
             )
     
     return "KBO Baseball data."

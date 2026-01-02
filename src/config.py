@@ -34,7 +34,7 @@ RAW_DATA_DIR = DATA_DIR / "raw"
 CHROMA_DB_DIR = DATA_DIR / "chroma_db"
 
 # 데이터 하위 폴더
-SEASON_DATA_DIR = RAW_DATA_DIR / "season_2025"
+SEASON_DATA_DIR = RAW_DATA_DIR / "seasons"
 MATCH_DATA_DIR = RAW_DATA_DIR / "matches"
 
 # =============================================================================

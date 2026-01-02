@@ -163,6 +163,9 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
     """
     경기별 투수/타자 기록 데이터를 로드합니다.
     
+    같은 날짜 + 같은 팀의 기록들을 하나의 문서로 그룹화합니다.
+    예: 2025-10-06 NC팀의 모든 투수 기록 → 하나의 문서
+    
     현재 JSON 구조:
     [
       {
@@ -181,7 +184,7 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
         data_dir: 경기 데이터 디렉토리 경로
     
     Returns:
-        List[Dict]: 로드된 개별 경기 기록 목록
+        List[Dict]: 날짜+팀으로 그룹화된 경기 기록 목록
     """
     if data_dir is None:
         data_dir = MATCH_DATA_DIR
@@ -220,30 +223,41 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
                     dataset_name = dataset.get("name", "")
                     dataset_id = dataset.get("dataset_id", "")
                     
-                    # data 배열 내 각 레코드를 개별 문서로 처리
+                    # data 배열 내 각 레코드를 날짜+팀으로 그룹화
                     records = dataset.get("data", [])
                     print(f"   - {json_file.name}: {len(records)}개 레코드 발견")
                     
+                    # 날짜+팀 기준으로 그룹화
+                    grouped = {}
                     for record in records:
-                        # 개별 레코드에 메타데이터 추가
-                        record["_source_file"] = json_file.name
-                        record["_data_type"] = "match"
-                        record["_loaded_at"] = datetime.now().isoformat()
-                        record["_dataset_name"] = dataset_name
-                        record["_dataset_id"] = dataset_id
-                        record["_season_type"] = season_type
-                        record["_record_type"] = record_type
-                        record["_year"] = year
+                        date = record.get("Date", "Unknown")
+                        team = record.get("Team", "Unknown")
+                        key = (date, team)
                         
-                        # Date 필드가 있으면 date로 복사
-                        if "Date" in record:
-                            record["date"] = record["Date"]
-                        
-                        # Team 필드가 있으면 teams 리스트로 변환
-                        if "Team" in record:
-                            record["teams"] = [record["Team"]]
-                        
-                        match_data.append(record)
+                        if key not in grouped:
+                            grouped[key] = []
+                        grouped[key].append(record)
+                    
+                    print(f"     → {len(grouped)}개 경기(날짜+팀)로 그룹화")
+                    
+                    # 그룹화된 데이터를 문서로 변환
+                    for (date, team), player_records in grouped.items():
+                        grouped_doc = {
+                            "_source_file": json_file.name,
+                            "_data_type": "match",
+                            "_loaded_at": datetime.now().isoformat(),
+                            "_dataset_name": dataset_name,
+                            "_dataset_id": dataset_id,
+                            "_season_type": season_type,
+                            "_record_type": record_type,
+                            "_year": year,
+                            "Date": date,
+                            "date": date,
+                            "Team": team,
+                            "teams": [team],
+                            "players": player_records  # 해당 경기의 모든 선수 기록
+                        }
+                        match_data.append(grouped_doc)
             else:
                 print(f"⚠️ 예상치 못한 JSON 구조: {json_file.name}")
             
@@ -298,22 +312,28 @@ def create_document_from_data(data: Dict, data_type: str) -> Document:
         metadata["stat_type"] = data.get("_stat_type", "")
         metadata["season_type"] = data.get("_season_type", "Regular")
         metadata["player_name"] = data.get("Name", "")
-        # teams 필드: 메타데이터 필터링용
+        # teams 필드: 메타데이터 필터링용 (ChromaDB는 리스트를 지원하지 않으므로 쉼표 구분 문자열로 저장)
         if data.get("teams"):
-            metadata["teams"] = data.get("teams")
+            metadata["teams"] = ",".join(data.get("teams"))
         elif data.get("Team"):
-            metadata["teams"] = [data.get("Team")]
+            metadata["teams"] = data.get("Team")
     
-    # 경기 데이터 메타데이터 (투수/타자 기록)
+    # 경기 데이터 메타데이터 (날짜+팀 그룹화된 투수/타자 기록)
     elif data_type == "match":
         metadata["date"] = data.get("date", data.get("Date", ""))
-        metadata["teams"] = data.get("teams", [])
+        # teams 필드: ChromaDB는 리스트를 지원하지 않으므로 쉼표 구분 문자열로 저장
+        teams_list = data.get("teams", [])
+        metadata["teams"] = ",".join(teams_list) if teams_list else ""
         metadata["team"] = data.get("Team", "")
-        metadata["player_name"] = data.get("Name", "")
         metadata["season_type"] = data.get("_season_type", "Regular")
         metadata["year"] = data.get("_year", "2025")
         metadata["record_type"] = data.get("_record_type", "pitcher")
-        metadata["result"] = data.get("Result", "")
+        
+        # 그룹화된 선수 목록 (이름만 추출하여 저장)
+        players = data.get("players", [])
+        player_names = [p.get("Name", "") for p in players if p.get("Name")]
+        metadata["player_names"] = ",".join(player_names) if player_names else ""
+        metadata["player_count"] = len(players)
     
     return Document(
         page_content=embedding_text,
