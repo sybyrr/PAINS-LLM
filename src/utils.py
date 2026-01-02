@@ -12,6 +12,11 @@ import re
 
 from .config import TEAM_MATCH_THRESHOLD, PLAYER_MATCH_THRESHOLD
 
+# 추가 라이브러리
+
+from typing import List, Dict, Any
+from datetime import datetime
+
 # =============================================================================
 # KBO 팀 매핑 딕셔너리
 # 다양한 팀 명칭(별명, 약어, 영문명 등)을 공식 명칭으로 매핑
@@ -468,3 +473,81 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
             )
     
     return "KBO Baseball data."
+
+### ====== generate_game_description 함수 =====
+
+def generate_game_description(
+    date: str, 
+    team: str, 
+    opponent: str, 
+    players: List[Dict[str, Any]]
+) -> str:
+    """
+    특정 날짜, 특정 팀의 경기 전체 투수 기록을 요약하는 문장을 생성합니다.
+    입력:
+        date: "2025-05-05" 형태의 문자열
+        team: "Doosan" 등 팀명
+        opponent: "LG" 등 상대 팀명
+        players: 해당 경기에 등판한 투수들의 레코드 리스트
+    """
+    
+    # 1. 날짜 포맷 변경 (2025-05-05 -> 2025년 5월 5일)
+    try:
+        dt = datetime.strptime(date, "%Y-%m-%d")
+        date_str = dt.strftime("%Y년 %m월 %d일")
+    except ValueError:
+        date_str = date  # 포맷이 안 맞으면 그대로 사용
+
+    # 2. 투수별 기록 요약 및 팀 전체 스탯 계산
+    player_summaries = []
+    total_ip = 0.0
+    total_er = 0
+    game_result_keyword = "" # 승리/패배 여부 파악용
+
+    for p in players:
+        name = p.get("Name", "Unknown")
+        result = p.get("Result") # 승, 패, 세, 홀드 등 (없으면 None/null)
+        
+        # IP(이닝), ER(자책점) 데이터 가져오기 (문자열일 수 있으므로 처리)
+        try:
+            ip = float(p.get("IP", 0))
+            er = int(p.get("ER", 0))
+            total_ip += ip
+            total_er += er
+        except (ValueError, TypeError):
+            ip = 0
+            er = 0
+
+        # 투수 개별 요약 텍스트 생성
+        # 예: "이영하(승, 5이닝 2자책)" 또는 "김택연(1이닝 0자책)"
+        stats_txt = f"{ip}이닝 {er}자책"
+        
+        if result:
+            player_str = f"{name}({result}, {stats_txt})"
+            # 승패 정보 추출 (팀의 승패를 추론하기 위함)
+            if result == "승":
+                game_result_keyword = "승리"
+            elif result == "패" and not game_result_keyword: # 승리 투수가 없으면 패배로 기록
+                game_result_keyword = "패배"
+        else:
+            player_str = f"{name}({stats_txt})"
+            
+        player_summaries.append(player_str)
+
+    # 3. 자연어 문장 생성
+    players_text = ", ".join(player_summaries)
+    
+    # 문장 템플릿:
+    # "2025년 5월 5일, 두산이(가) LG를 상대로 치른 경기(승리)의 투수 기록입니다..."
+    intro = f"{date_str}, {team} 팀이 {opponent} 팀을 상대로 치른 경기"
+    
+    if game_result_keyword:
+        intro += f"({game_result_keyword})"
+    
+    description = (
+        f"{intro}의 투수 기록입니다. "
+        f"등판 투수: {players_text}. "
+        f"팀 합계: {total_ip}이닝 {total_er}자책점."
+    )
+    
+    return description
