@@ -347,7 +347,7 @@ def create_document_from_data(data: Dict, data_type: str) -> Document:
 
 def load_schedule_mapping(csv_path: str) -> Dict[str, str]:
     """
-    일정 CSV(games_2025.csv)를 읽어 (날짜_팀명) -> 상대팀명 매핑 딕셔너리를 반환합니다.
+    일정 CSV(src/games_2025.csv)를 읽어 (날짜_팀명) -> 상대팀명 매핑 딕셔너리를 반환합니다.
     CSV의 한글 팀명을 TEAM_MAP을 통해 영문(공식명칭)으로 변환하여 매핑합니다.
     """
     mapping = {}
@@ -581,7 +581,7 @@ def ingest_all_data(
     
     # [NEW] 일정 데이터 로드 (상대 팀 매핑용)
     # 파일 위치가 바뀌면 이 경로만 수정하면 됩니다.
-    SCHEDULE_CSV_PATH = "games_2025.csv" 
+    SCHEDULE_CSV_PATH = "src/games_2025.csv" 
     schedule_map = load_schedule_mapping(SCHEDULE_CSV_PATH)
     
     if not match_data:
