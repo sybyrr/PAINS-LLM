@@ -17,6 +17,8 @@ from langchain.schema import Document
 from langchain_community.retrievers import BM25Retriever
 from langchain.retrievers import EnsembleRetriever
 
+from openai import OpenAI
+
 from .config import (
     CHROMA_DB_DIR,
     COLLECTION_NAME,
@@ -32,9 +34,65 @@ from .utils import (
 
 
 # =============================================================================
-# 벡터 스토어 접근
+# 쿼리 번역 (한국어 → 영어)
 # =============================================================================
 
+_openai_client: OpenAI = None
+
+
+def get_openai_client() -> OpenAI:
+    """OpenAI 클라이언트 싱글톤"""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI()
+    return _openai_client
+
+
+def translate_query_to_english(query: str) -> str:
+    """
+    한국어 쿼리를 완전히 영어로 번역합니다.
+    
+    선수 이름, 팀 이름, 야구 용어 모두 영어로 변환합니다.
+    Description도 영어로 저장되어 있어 영어-영어 비교로 유사도가 높아집니다.
+    
+    Args:
+        query: 한국어 쿼리
+    
+    Returns:
+        str: 완전히 영어로 번역된 쿼리
+    """
+    client = get_openai_client()
+    
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You are a translator for KBO (Korean Baseball Organization) queries. "
+                    "Translate the Korean query completely to English:\n"
+                    "1. Romanize player names (e.g., 류현진 → Ryu Hyun-jin, 후라도 → Hueraldo)\n"
+                    "2. Translate team names (e.g., 한화 → Hanwha, 롯데 → Lotte)\n"
+                    "3. Translate baseball terms (e.g., 시즌 성적 → season stats, 방어율 → ERA)\n"
+                    "4. Remove adjectives/filler words (e.g., '진짜 잘하는' → remove)\n"
+                    "5. Output ONLY the translated query, nothing else.\n\n"
+                    "Examples:\n"
+                    "- '류현진 2025 시즌 성적' → 'Ryu Hyun-jin 2025 season stats'\n"
+                    "- '진짜 잘하는 후라도 2025시즌 성적' → 'Hueraldo 2025 season stats'\n"
+                    "- '한화 이글스 올시즌 투수 분석' → 'Hanwha Eagles this season pitching analysis'"
+                )
+            },
+            {"role": "user", "content": query}
+        ],
+        temperature=0
+    )
+    
+    return response.choices[0].message.content.strip()
+
+
+# =============================================================================
+# 벡터 스토어 접근
+# =============================================================================
 _vector_store: Optional[Chroma] = None
 
 
@@ -62,29 +120,38 @@ def get_vector_store() -> Chroma:
 def semantic_search(
     query: str,
     top_k: int = RETRIEVAL_TOP_K,
-    metadata_filter: Dict = None
+    metadata_filter: Dict = None,
+    verbose: bool = False
 ) -> List[Tuple[Document, float]]:
     """
     시맨틱 검색을 수행합니다.
     
     임베딩 유사도 기반으로 관련 문서를 검색합니다.
-    Instruct 모델 형식으로 쿼리를 변환하여 검색 정확도를 높입니다.
+    한국어 쿼리를 영어로 번역하여 영어 description과 비교합니다.
     
     Args:
         query: 검색 쿼리
         top_k: 반환할 최대 문서 수
         metadata_filter: ChromaDB where 필터
+        verbose: 번역 결과 출력 여부
     
     Returns:
         List[Tuple[Document, float]]: (문서, 유사도 점수) 목록
     """
     vector_store = get_vector_store()
     
+    # 한국어 쿼리를 영어로 번역 (영어 description과 비교하기 위해)
+    translated_query = translate_query_to_english(query)
+    
+    if verbose:
+        print(f"📝 원본 쿼리: {query}")
+        print(f"🔄 번역 쿼리: {translated_query}")
+    
     # Instruct 모델용 쿼리 포맷팅
     # 논문 Section 4.4.1에서 검증된 형식
     formatted_query = (
         f"Instruct: Find the baseball dataset covering the given team(s) and statistics. "
-        f"Query: {query}"
+        f"Query: {translated_query}"
     )
     
     # 메타데이터 필터가 있는 경우
@@ -173,8 +240,12 @@ def hybrid_search(
         date=date
     )
     
-    # 2. 검색 쿼리 정제
-    cleaned_query = clean_query_for_embedding(query, teams, date)
+    # 2. 검색 쿼리 정제 (논문 Section 4.3.2: Fully Cleaned 쿼리)
+    # data_type을 query_type으로 변환
+    query_type_map = {"season": "season_analysis", "match": "match_analysis"}
+    query_type = query_type_map.get(data_type)
+    
+    cleaned_query = clean_query_for_embedding(query, teams, date, query_type)
     
     print(f"🔍 검색 쿼리: {cleaned_query}")
     if metadata_filter:
@@ -327,9 +398,16 @@ def prepare_context_for_llm(
     # =================================================================
     # 헤더는 이미 위에서 제거됨
     
+    # teams 메타데이터 파싱 (ChromaDB는 리스트를 쉼표 구분 문자열로 저장)
+    teams_raw = document.metadata.get("teams", "")
+    if isinstance(teams_raw, str):
+        teams_list = [t.strip() for t in teams_raw.split(",") if t.strip()]
+    else:
+        teams_list = teams_raw if teams_raw else []
+    
     return {
         "type": document.metadata.get("type"),
-        "teams": document.metadata.get("teams", []),
+        "teams": teams_list,
         "date": document.metadata.get("date"),
         "season": document.metadata.get("season"),
         "data": raw_data

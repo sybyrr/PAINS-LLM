@@ -30,7 +30,7 @@ from .config import (
     PROCESSED_DATA_DIR
 )
 
-from .utils import generate_game_description, TEAM_MAP
+from .utils import generate_game_description, generate_descriptive_sentence, TEAM_MAP
 
 # =============================================================================
 # 임베딩 모델 초기화
@@ -363,6 +363,43 @@ def prepare_game_documents(game_data: List[Dict]) -> List[Document]:
     return documents
 
 
+def prepare_season_documents(season_data: List[Dict]) -> List[Document]:
+    """
+    시즌 데이터를 LangChain Document로 변환합니다.
+    
+    Args:
+        season_data: 시즌 데이터 리스트
+    
+    Returns:
+        List[Document]: LangChain Document 리스트
+    """
+    documents = []
+    
+    print(f"🔄 {len(season_data)}개의 시즌 데이터를 Document로 변환 중...")
+    
+    for record in season_data:
+        # 1. 설명 문장 생성
+        description = generate_descriptive_sentence(record, "season")
+        
+        # 2. 메타데이터 구성
+        metadata = {
+            "type": "season",
+            "season": str(record.get("season", "2025")),
+            "season_type": record.get("_season_type", "Regular"),
+            "team": record.get("Team", record.get("team", "")),
+            "teams": record.get("Team", record.get("team", "")), # For consistency with match data
+            "name": record.get("Name", ""),
+            "stat_type": record.get("_stat_type", "pitching"),
+            # 원본 데이터 저장
+            "original_data": json.dumps(record, ensure_ascii=False)
+        }
+        
+        doc = Document(page_content=description, metadata=metadata)
+        documents.append(doc)
+        
+    return documents
+
+
 # =============================================================================
 # ChromaDB 적재 함수
 # =============================================================================
@@ -465,13 +502,15 @@ def clear_vector_store(persist_directory: str = None, collection_name: str = Non
 
 def ingest_all_data(
     processed_dir: Path = None,
+    season_dir: Path = None,
     clear_existing: bool = True
 ) -> Chroma:
     """
-    전처리된 경기별 데이터를 로드하고 ChromaDB에 적재하는 메인 파이프라인입니다.
+    전처리된 경기별 데이터와 시즌 데이터를 로드하고 ChromaDB에 적재하는 메인 파이프라인입니다.
     
     Args:
         processed_dir: 전처리된 데이터 디렉토리 (None일 경우 config 기본값 사용)
+        season_dir: 시즌 데이터 디렉토리 (None일 경우 config 기본값 사용)
         clear_existing: 기존 데이터 삭제 여부 (기본값 True)
     
     Returns:
@@ -493,13 +532,18 @@ def ingest_all_data(
     print("\n📥 전처리된 경기 데이터 로드 중...")
     game_data = load_processed_game_data(processed_dir)
     
-    if not game_data:
-        print("⚠️ 전처리된 경기 데이터가 없습니다.")
-        print("   먼저 preprocess.ipynb를 실행하여 데이터를 전처리하세요.")
+    # 3. 시즌 데이터 로드
+    print("\n📥 시즌 데이터 로드 중...")
+    season_data = load_season_data(season_dir)
+    
+    if not game_data and not season_data:
+        print("⚠️ 데이터가 없습니다.")
+        print("   먼저 preprocess.ipynb를 실행하여 데이터를 전처리하거나 시즌 데이터를 확인하세요.")
         return None
     
     print(f"\n📊 로드된 데이터 요약:")
     print(f"   - 경기 수: {len(game_data)}")
+    print(f"   - 시즌 데이터 레코드: {len(season_data)}")
     
     # 시즌별 통계
     regular_games = [g for g in game_data if g.get('season_type') == 'Regular']
@@ -507,19 +551,25 @@ def ingest_all_data(
     print(f"   - 정규시즌: {len(regular_games)}경기")
     print(f"   - 포스트시즌: {len(post_games)}경기")
     
-    # 3. Document 변환
-    documents = prepare_game_documents(game_data)
+    # 4. Document 변환
+    documents = []
+    
+    if game_data:
+        documents.extend(prepare_game_documents(game_data))
+        
+    if season_data:
+        documents.extend(prepare_season_documents(season_data))
     
     if not documents:
         print("⚠️ 생성된 문서가 없습니다. 데이터 무결성을 확인하세요.")
         return None
 
-    # 4. ChromaDB 적재
+    # 5. ChromaDB 적재
     vector_store = initialize_vector_store(documents)
     
-    # 5. 결과 확인
+    # 6. 결과 확인
     doc_count = vector_store._collection.count()
-    print(f"\n✅ 적재 완료! 총 {doc_count}개의 '경기 단위' 문서가 저장되었습니다.")
+    print(f"\n✅ 적재 완료! 총 {doc_count}개의 문서가 저장되었습니다.")
     print("=" * 60)
     
     return vector_store

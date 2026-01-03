@@ -9,13 +9,151 @@ from rapidfuzz import fuzz, process
 from typing import Optional, Tuple, List, Dict
 from datetime import datetime
 import re
+import os
 
 from .config import TEAM_MATCH_THRESHOLD, PLAYER_MATCH_THRESHOLD
 
 # 추가 라이브러리
-
+from openai import OpenAI
 from typing import List, Dict, Any
 from datetime import datetime
+
+
+# =============================================================================
+# 선수 이름 영어 변환 (캐싱 지원)
+# =============================================================================
+
+_player_name_cache: Dict[str, str] = {}
+_openai_client: OpenAI = None
+
+
+def get_openai_client() -> OpenAI:
+    """OpenAI 클라이언트 싱글톤"""
+    global _openai_client
+    if _openai_client is None:
+        _openai_client = OpenAI()
+    return _openai_client
+
+
+def romanize_player_name(korean_name: str) -> str:
+    """
+    한국어 선수 이름을 로마자(영어)로 변환합니다.
+    
+    캐시를 사용하여 동일한 이름의 중복 번역을 방지합니다.
+    
+    Args:
+        korean_name: 한국어 선수 이름 (예: "류현진", "후라도")
+    
+    Returns:
+        str: 로마자 이름 (예: "Ryu Hyun-jin", "Hueraldo")
+    """
+    global _player_name_cache
+    
+    # 이미 영어인 경우 그대로 반환
+    if korean_name and all(ord(c) < 128 or c.isspace() for c in korean_name):
+        return korean_name
+    
+    # 캐시 확인
+    if korean_name in _player_name_cache:
+        return _player_name_cache[korean_name]
+    
+    try:
+        client = get_openai_client()
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Korean-to-English name romanizer for KBO baseball players. "
+                        "Convert Korean player names to their official romanized form. "
+                        "For foreign players, use their original name (e.g., 후라도 → Hueraldo). "
+                        "For Korean players, use standard romanization (e.g., 류현진 → Ryu Hyun-jin). "
+                        "Output ONLY the romanized name, nothing else."
+                    )
+                },
+                {"role": "user", "content": korean_name}
+            ],
+            temperature=0
+        )
+        
+        romanized = response.choices[0].message.content.strip()
+        _player_name_cache[korean_name] = romanized
+        return romanized
+        
+    except Exception as e:
+        # API 오류 시 원본 이름 반환
+        print(f"⚠️ 이름 변환 실패 ({korean_name}): {e}")
+        return korean_name
+
+
+def romanize_player_names_batch(names: List[str]) -> Dict[str, str]:
+    """
+    여러 선수 이름을 한 번에 로마자로 변환합니다.
+    배치 처리로 API 호출 횟수를 줄입니다.
+    
+    Args:
+        names: 한국어 선수 이름 리스트
+    
+    Returns:
+        Dict[str, str]: 한국어 이름 -> 로마자 이름 매핑
+    """
+    global _player_name_cache
+    
+    # 이미 캐시된 이름 제외
+    uncached_names = [n for n in names if n not in _player_name_cache and n]
+    
+    if not uncached_names:
+        return {n: _player_name_cache.get(n, n) for n in names}
+    
+    # 영어 이름은 그대로 유지
+    korean_names = []
+    for name in uncached_names:
+        if all(ord(c) < 128 or c.isspace() for c in name):
+            _player_name_cache[name] = name
+        else:
+            korean_names.append(name)
+    
+    if not korean_names:
+        return {n: _player_name_cache.get(n, n) for n in names}
+    
+    try:
+        client = get_openai_client()
+        
+        names_text = "\n".join(korean_names)
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are a Korean-to-English name romanizer for KBO baseball players. "
+                        "Convert each Korean player name to their official romanized form. "
+                        "For foreign players, use their original name (e.g., 후라도 → Hueraldo). "
+                        "For Korean players, use standard romanization (e.g., 류현진 → Ryu Hyun-jin). "
+                        "Output one romanized name per line, in the same order as input. "
+                        "Output ONLY the names, no numbers or explanations."
+                    )
+                },
+                {"role": "user", "content": names_text}
+            ],
+            temperature=0
+        )
+        
+        romanized_names = response.choices[0].message.content.strip().split("\n")
+        
+        for korean, romanized in zip(korean_names, romanized_names):
+            _player_name_cache[korean] = romanized.strip()
+        
+    except Exception as e:
+        print(f"⚠️ 배치 이름 변환 실패: {e}")
+        for name in korean_names:
+            _player_name_cache[name] = name
+    
+    return {n: _player_name_cache.get(n, n) for n in names}
+
 
 # =============================================================================
 # KBO 팀 매핑 딕셔너리
@@ -62,6 +200,7 @@ TEAM_MAP: Dict[str, str] = {
     "자이언츠": "Lotte",
     "Lotte Giants": "Lotte",
     "lotte": "Lotte",
+    "꼴데" : "Lotte",
     
     # 기아 타이거즈
     "기아": "KIA",
@@ -90,6 +229,7 @@ TEAM_MAP: Dict[str, str] = {
     "인천": "SSG",
     "SSG Landers": "SSG",
     "ssg": "SSG",
+    "쓱": "SSG",
     
     # 키움 히어로즈
     "키움": "Kiwoom",
@@ -98,6 +238,7 @@ TEAM_MAP: Dict[str, str] = {
     "히어로즈": "Kiwoom",
     "Kiwoom Heroes": "Kiwoom",
     "kiwoom": "Kiwoom",
+    "넥센" : "Kiwoom",
     
     # KT 위즈
     "KT": "KT",
@@ -107,6 +248,7 @@ TEAM_MAP: Dict[str, str] = {
     "위즈": "KT",
     "KT Wiz": "KT",
     "kt": "KT",
+    "크트": "KT"
 }
 
 # 공식 팀 목록 (영문)
@@ -283,39 +425,60 @@ def extract_date_from_query(query: str) -> Optional[str]:
     return None
 
 
-def clean_query_for_embedding(query: str, teams: List[str] = None, date: str = None) -> str:
+def clean_query_for_embedding(
+    query: str, 
+    teams: List[str] = None, 
+    date: str = None,
+    query_type: str = None
+) -> str:
     """
     임베딩 검색을 위해 쿼리를 정제합니다.
     
-    논문의 Fully Cleaned 쿼리 전략을 구현합니다.
-    불필요한 단어를 제거하고 핵심 엔티티만 남깁니다.
+    논문 Section 4.3.2의 "Fully Cleaned" 쿼리 전략을 구현합니다.
+    - 원본 쿼리에서 핵심 엔티티(선수명, 팀명, 시즌)를 추출
+    - 정해진 형식으로 검색 쿼리를 구성
     
     Args:
         query: 원본 사용자 쿼리
         teams: 정규화된 팀 목록
         date: 추출된 날짜
+        query_type: 쿼리 유형 ("season_analysis" 또는 "match_analysis")
     
     Returns:
-        str: 정제된 검색 쿼리
+        str: 정규화된 검색 쿼리
     """
-    # 검색에 최적화된 쿼리 구성
-    parts = []
+    from .retriever import translate_query_to_english
     
-    if teams:
-        if len(teams) >= 2:
-            # 두 팀이 있으면 경기 분석으로 추정
-            parts.append(f"Game between {teams[0]} and {teams[1]}")
+    # 1. 원본 쿼리를 영어로 번역 (선수명, 시즌 정보 추출을 위해)
+    translated = translate_query_to_english(query)
+    
+    # 2. 쿼리 유형에 따른 정규화된 형식 구성
+    if query_type == "match_analysis":
+        # 경기 분석: "Find dataset for game between {team1} and {team2} on {date}. {details}"
+        # 선수 정보 등 추가 컨텍스트를 위해 번역된 쿼리도 함께 포함
+        if teams and len(teams) >= 2:
+            base = f"Find dataset for game between {teams[0]} and {teams[1]}"
+            if date:
+                base += f" on {date}"
+            # 번역된 쿼리에 선수 정보 등 추가 정보가 있을 수 있으므로 포함
+            return f"{base}. {translated}"
+        elif date:
+            return f"Find dataset for game on {date}. {translated}"
         else:
-            parts.append(f"Data for team {teams[0]}")
+            return translated
     
-    if date:
-        parts.append(f"on {date}")
+    elif query_type == "season_analysis":
+        # 시즌 분석: 선수명이 포함된 경우와 팀 분석의 경우를 구분
+        if teams:
+            # 번역된 쿼리에 팀명이 아닌 다른 정보(선수명 등)가 있는지 확인
+            # translated에서 팀명을 제외한 나머지가 선수 정보
+            return f"Find dataset for {teams[0]} player season stats. {translated}"
+        else:
+            return f"Find dataset for player season stats. {translated}"
     
-    if not parts:
-        # 팀/날짜 정보가 없으면 원본 쿼리 일부 사용
-        return query
-    
-    return " ".join(parts)
+    else:
+        # 기본: 번역된 쿼리 사용
+        return translated
 
 
 def build_metadata_filter(
@@ -380,8 +543,8 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
         str: 임베딩용 설명 문장
     
     Example:
-        Season: "2025 Regular season pitching stats for 류현진 (NC). ERA: 2.85, W: 12, L: 5"
-        Match: "Pitcher 구창모 from NC on 2025-10-06 (Post). Result: 승, IP: 6, ER: 1, SO: 5"
+        Season: "Ryu Hyun-jin 2025 Regular season pitching stats. Team: Hanwha. ERA: 3.23..."
+        Match: "Pitcher Koo Chang-mo from NC on 2025-10-06 (Post). Result: W, IP: 6, ER: 1, SO: 5"
     """
     if data_type == "season":
         # 시즌 데이터용 설명 문장 (선수별 누적 통계)
@@ -389,7 +552,10 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
         season = data.get("season", "2025")
         season_type = data.get("_season_type", "Regular")
         stat_type = data.get("_stat_type", "pitching")
-        player_name = data.get("Name", "Unknown Player")
+        player_name_kr = data.get("Name", "Unknown Player")
+        
+        # 선수 이름을 영어로 변환
+        player_name = romanize_player_name(player_name_kr)
         
         # 투수 통계 주요 지표
         if stat_type == "pitching":
@@ -399,9 +565,11 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
             ip = data.get("IP", 0)
             so = data.get("SO", 0)
             
+            # 선수 이름을 맨 앞에 배치하여 검색 유사도 향상
+            # 쿼리: "Ryu Hyun-jin 2025 season stats" → Description: "Ryu Hyun-jin 2025 Regular season..."
             return (
-                f"{season} {season_type} season pitching stats for {player_name} ({team}). "
-                f"ERA: {era}, W: {wins}, L: {losses}, IP: {ip}, SO: {so}. "
+                f"{player_name} {season} {season_type} season pitching stats. "
+                f"Team: {team}. ERA: {era}, W: {wins}, L: {losses}, IP: {ip}, SO: {so}. "
                 f"KBO baseball pitcher season statistics."
             )
         else:
@@ -411,8 +579,8 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
             rbi = data.get("RBI", 0)
             
             return (
-                f"{season} {season_type} season batting stats for {player_name} ({team}). "
-                f"AVG: {avg}, HR: {hr}, RBI: {rbi}. "
+                f"{player_name} {season} {season_type} season batting stats. "
+                f"Team: {team}. AVG: {avg}, HR: {hr}, RBI: {rbi}. "
                 f"KBO baseball batter season statistics."
             )
     
@@ -480,42 +648,52 @@ def summarize_team_pitchers(pitchers: List[Dict[str, Any]], team_name: str) -> s
     """
     팀 투수진 기록을 요약합니다.
     
+    NOTE: 선수 이름은 포함하지 않습니다.
+    이유: "류현진 시즌 성적" 같은 쿼리가 match 데이터를 검색하는 것을 방지.
+    선수 이름은 season 데이터에서만 검색되어야 합니다.
+    
     Args:
         pitchers: 투수 레코드 리스트
         team_name: 팀 이름
     
     Returns:
-        str: 투수진 요약 문자열
+        str: 투수진 요약 문자열 (팀 통계만 포함, 선수명 제외)
     """
     if not pitchers:
-        return f"{team_name}: 투수 기록 없음"
+        return f"{team_name} 투수진: 기록 없음"
     
-    summaries = []
     total_ip = 0.0
     total_er = 0
+    total_so = 0
+    win_count = 0
+    loss_count = 0
     
     for p in pitchers:
-        name = p.get('Name', 'Unknown')
-        result = p.get('Result', '')
-        
         try:
             ip = float(p.get('IP', 0))
             er = int(p.get('ER', 0))
+            so = int(p.get('SO', 0))
             total_ip += ip
             total_er += er
+            total_so += so
         except (ValueError, TypeError):
-            ip, er = 0, 0
+            pass
         
-        if result:
-            summaries.append(f"{name}({result})")
-        else:
-            summaries.append(name)
+        result = p.get('Result', '')
+        if result == '승':
+            win_count += 1
+        elif result == '패':
+            loss_count += 1
     
-    pitchers_text = ", ".join(summaries[:5])
-    if len(summaries) > 5:
-        pitchers_text += f" 외 {len(summaries)-5}명"
+    pitcher_count = len(pitchers)
     
-    return f"{team_name} 투수진({total_ip:.0f}이닝 {total_er}자책): {pitchers_text}"
+    # 선수명 없이 팀 통계만 포함
+    summary = f"{team_name} 투수진: {pitcher_count}명 등판, {total_ip:.0f}이닝, {total_er}자책점, {total_so}삼진"
+    
+    if win_count > 0 or loss_count > 0:
+        summary += f" (승{win_count}/패{loss_count})"
+    
+    return summary
 
 
 def generate_game_description(game_data: Dict[str, Any]) -> str:
