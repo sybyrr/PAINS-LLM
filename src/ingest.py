@@ -346,7 +346,6 @@ def prepare_game_documents(game_data: List[Dict]) -> List[Document]:
             "date": game.get("date", ""),
             "home_team": game.get("home_team", ""),
             "away_team": game.get("away_team", ""),
-            "teams": f"{game.get('home_team', '')},{game.get('away_team', '')}",
             "home_runs": game.get("home_runs", ""),
             "away_runs": game.get("away_runs", ""),
             "season_type": game.get("season_type", "Regular"),

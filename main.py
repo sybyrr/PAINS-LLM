@@ -73,6 +73,20 @@ def main():
         print(f"🔍 질문: {args.query}")
         from src.agent import chat
         response = chat(args.query)
+        
+        # 검색 정보 출력
+        print(f"\n📑 검색 정보:")
+        print(f"   - 유사도: {response.retrieval_score:.2%}")
+        print(f"   - 검색 방법: {response.retrieval_method}")
+        if response.retrieved_doc_info:
+            doc = response.retrieved_doc_info
+            print(f"   - 문서 타입: {doc.get('type')}")
+            print(f"   - 팀: {doc.get('teams')}")
+            if doc.get('date'):
+                print(f"   - 날짜: {doc.get('date')}")
+            if doc.get('player_name'):
+                print(f"   - 선수: {doc.get('player_name')}")
+        
         print(f"\n🤖 답변:\n{response.response}")
         
         if response.dashboard:

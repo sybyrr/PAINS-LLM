@@ -490,9 +490,12 @@ def build_metadata_filter(
     """
     ChromaDB 메타데이터 필터를 생성합니다.
     
+    게임 데이터는 home_team, away_team 필드로 저장되어 있습니다.
+    팀 필터는 $or 연산자로 home_team 또는 away_team에 매칭합니다.
+    
     Args:
         teams: 필터링할 팀 목록
-        data_type: 데이터 유형 ("season" 또는 "match")
+        data_type: 데이터 유형 ("season" 또는 "game")
         date: 경기 날짜
         season: 시즌 (예: "2025")
     
@@ -504,9 +507,26 @@ def build_metadata_filter(
     if data_type:
         conditions.append({"type": data_type})
     
+    # 팀 필터: home_team 또는 away_team에 매칭
     if teams:
-        # $in 연산자: 팀 목록 중 하나라도 포함된 경우
-        conditions.append({"teams": {"$in": teams}})
+        if len(teams) == 1:
+            # 단일 팀: home 또는 away에 해당 팀이 있으면 됨
+            team = teams[0]
+            conditions.append({
+                "$or": [
+                    {"home_team": team},
+                    {"away_team": team}
+                ]
+            })
+        elif len(teams) == 2:
+            # 두 팀: 두 팀이 모두 경기에 참여해야 함
+            # (team1이 home이고 team2가 away) OR (team1이 away이고 team2가 home)
+            conditions.append({
+                "$or": [
+                    {"$and": [{"home_team": teams[0]}, {"away_team": teams[1]}]},
+                    {"$and": [{"home_team": teams[1]}, {"away_team": teams[0]}]}
+                ]
+            })
     
     if date:
         conditions.append({"date": date})

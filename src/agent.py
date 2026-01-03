@@ -89,8 +89,12 @@ class AgentResponse:
     response: str                       # 텍스트 응답
     tool_calls: List[Dict] = field(default_factory=list)  # 호출된 도구
     dashboard: Optional[Dict] = None    # 생성된 대시보드 (있는 경우)
-    context_used: bool = False          # 검색된 컨텍스트 사용 여부
+    context_used: Optional[Dict] = None # 사용된 컨텍스트 데이터
     error: Optional[str] = None         # 오류 메시지 (있는 경우)
+    # 검색 결과 정보
+    retrieval_score: float = 0.0        # 검색 유사도 점수
+    retrieval_method: str = "none"      # 검색 방법 (semantic/bm25/hybrid)
+    retrieved_doc_info: Optional[Dict] = None  # 검색된 문서 정보
 
 
 # =============================================================================
@@ -174,24 +178,20 @@ class KBOAgent:
             AgentResponse: 에이전트 응답
         """
         try:
-            # 1. 분석 체인 실행 (분류 + 검색)
+            # 1. 분석 체인 실행 (분류 + 검색 + 응답 생성)
             chain_result = run_analysis(query)
             
-            # 2. 컨텍스트 기반 에이전트 호출
-            if chain_result.context:
-                # 검색된 데이터가 있는 경우 컨텍스트 포함
-                enhanced_query = self._enhance_query_with_context(
-                    query, chain_result
-                )
-                result = self.agent_executor.invoke({"input": enhanced_query})
+            # 2. 응답 결정
+            # chain에서 이미 완성된 응답을 사용 (데이터 분석 쿼리인 경우)
+            if chain_result.context and chain_result.query_type != "general":
+                # 분석 쿼리: chain의 응답 직접 사용 (데이터 잘림 방지)
+                response_text = chain_result.response
             else:
-                # 일반 질문인 경우 직접 처리
+                # 일반 질문: 에이전트 직접 처리
                 result = self.agent_executor.invoke({"input": query})
+                response_text = result.get("output", "")
             
-            # 3. 응답 파싱
-            response_text = result.get("output", "")
-            
-            # 4. 대시보드 필요 여부 확인 및 생성
+            # 3. 대시보드 필요 여부 확인 및 생성
             dashboard = None
             tool_calls = []
             
@@ -205,13 +205,29 @@ class KBOAgent:
                     }
                 })
             
+            # 4. 검색된 문서 정보 구성
+            retrieved_doc_info = None
+            if chain_result.context:
+                retrieved_doc_info = {
+                    "type": chain_result.context.get("type"),
+                    "teams": chain_result.context.get("teams", []),
+                    "home_team": chain_result.context.get("home_team"),
+                    "away_team": chain_result.context.get("away_team"),
+                    "date": chain_result.context.get("date"),
+                    "season": chain_result.context.get("season"),
+                    "player_name": chain_result.context.get("data", {}).get("Name"),
+                }
+            
             return AgentResponse(
                 query=query,
                 response=response_text,
                 tool_calls=tool_calls,
                 dashboard=dashboard,
-                context_used=chain_result.context is not None,
-                error=None
+                context_used=chain_result.context,  # 실제 컨텍스트 데이터 저장
+                error=None,
+                retrieval_score=chain_result.retrieval_score,
+                retrieval_method=chain_result.retrieval_method,
+                retrieved_doc_info=retrieved_doc_info
             )
             
         except Exception as e:
@@ -360,9 +376,15 @@ def run_interactive_chat():
     print("  /quit - 종료")
     print("  /reset - 대화 초기화")
     print("  /history - 대화 기록 보기")
+    print("  /plot - 마지막 분석 결과 시각화")
+    print("=" * 60)
+    print("💡 팁: 질문 끝에 '시각화' 또는 'plot'을 추가하면 차트가 표시됩니다.")
     print("=" * 60)
     
     agent = KBOAgent()
+    last_context = None  # 마지막 분석 컨텍스트 저장
+    last_query_type = None
+    last_teams = None
     
     while True:
         try:
@@ -377,6 +399,9 @@ def run_interactive_chat():
                 break
             elif user_input.lower() == "/reset":
                 agent.reset_memory()
+                last_context = None
+                last_query_type = None
+                last_teams = None
                 continue
             elif user_input.lower() == "/history":
                 history = agent.get_conversation_history()
@@ -385,16 +410,72 @@ def run_interactive_chat():
                     role = "👤" if msg["role"] == "user" else "🤖"
                     print(f"{role}: {msg['content'][:100]}...")
                 continue
+            elif user_input.lower() == "/plot":
+                # 마지막 분석 결과 시각화
+                if last_context and last_query_type:
+                    from src.chain import get_chain
+                    chain = get_chain()
+                    chain._show_visualization(
+                        query_type=last_query_type,
+                        teams=last_teams or [],
+                        context=last_context
+                    )
+                else:
+                    print("⚠️ 시각화할 분석 결과가 없습니다. 먼저 경기나 시즌 분석 질문을 해주세요.")
+                continue
+            
+            # "시각화", "plot", "차트" 키워드 체크
+            show_plot = any(kw in user_input.lower() for kw in ['시각화', 'plot', '차트', '그래프'])
             
             # 챗봇 응답
             print("\n🤖 Assistant: ", end="")
             response = agent.chat(user_input)
             print(response.response)
             
+            # 컨텍스트 저장 (나중에 /plot 명령어용)
+            if response.context_used and response.retrieved_doc_info:
+                last_context = {
+                    "type": response.retrieved_doc_info.get("type"),
+                    "date": response.retrieved_doc_info.get("date"),
+                    "home_team": response.retrieved_doc_info.get("home_team"),
+                    "away_team": response.retrieved_doc_info.get("away_team"),
+                    "teams": response.retrieved_doc_info.get("teams"),
+                    "data": response.context_used.get("data", {}) if isinstance(response.context_used, dict) else {}
+                }
+                last_query_type = response.retrieved_doc_info.get("type")
+                last_teams = response.retrieved_doc_info.get("teams", [])
+            
+            # 검색 정보 출력
+            if response.context_used:
+                print(f"\n📑 참조 문서 (유사도: {response.retrieval_score:.2%}, 방법: {response.retrieval_method})")
+                if response.retrieved_doc_info:
+                    doc = response.retrieved_doc_info
+                    info_parts = []
+                    if doc.get('type'):
+                        info_parts.append(f"타입: {doc['type']}")
+                    if doc.get('teams'):
+                        info_parts.append(f"팀: {', '.join(doc['teams'])}")
+                    if doc.get('date'):
+                        info_parts.append(f"날짜: {doc['date']}")
+                    if doc.get('player_name'):
+                        info_parts.append(f"선수: {doc['player_name']}")
+                    print(f"   {' | '.join(info_parts)}")
+            
+            # 키워드로 시각화 요청한 경우
+            if show_plot and last_context and last_query_type:
+                from src.chain import get_chain
+                chain = get_chain()
+                chain._show_visualization(
+                    query_type=last_query_type,
+                    teams=last_teams or [],
+                    context=last_context
+                )
+            
             # 대시보드 생성 알림
             if response.dashboard:
                 print("\n📊 대시보드가 생성되었습니다!")
                 print(f"   위젯 수: {len(response.dashboard.get('widgets', []))}")
+                print("   💡 '/plot' 명령어로 시각화할 수 있습니다.")
             
             # 도구 호출 정보
             if response.tool_calls:

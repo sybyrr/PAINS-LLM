@@ -242,7 +242,7 @@ def hybrid_search(
     
     # 2. 검색 쿼리 정제 (논문 Section 4.3.2: Fully Cleaned 쿼리)
     # data_type을 query_type으로 변환
-    query_type_map = {"season": "season_analysis", "match": "match_analysis"}
+    query_type_map = {"season": "season_analysis", "game": "match_analysis"}
     query_type = query_type_map.get(data_type)
     
     cleaned_query = clean_query_for_embedding(query, teams, date, query_type)
@@ -270,6 +270,24 @@ def hybrid_search(
         
         if not semantic_results:
             return None, 0.0, "no_results"
+    
+    # 3.5. 팀 필터링 후처리 (ChromaDB 필터와 중복 확인용)
+    if teams:
+        filtered_results = []
+        for doc, score in semantic_results:
+            home_team = doc.metadata.get("home_team", "")
+            away_team = doc.metadata.get("away_team", "")
+            doc_teams = {home_team, away_team}
+            
+            # 요청된 모든 팀이 home_team 또는 away_team에 있는지 확인
+            if all(team in doc_teams for team in teams):
+                filtered_results.append((doc, score))
+        
+        if filtered_results:
+            semantic_results = filtered_results
+            print(f"📋 팀 필터 후처리 적용: {len(filtered_results)}개 결과")
+        else:
+            print(f"⚠️ 팀 필터 후 매칭 결과 없음, 원본 결과 유지")
     
     # 4. 최고 점수 확인
     top_doc, top_score = semantic_results[0]
@@ -337,7 +355,8 @@ def extract_raw_data(document: Document) -> Dict:
     Returns:
         Dict: 원본 JSON 데이터
     """
-    raw_data_str = document.metadata.get("raw_data", "{}")
+    # 메타데이터에서 원본 데이터 추출 (original_data 또는 raw_data)
+    raw_data_str = document.metadata.get("original_data") or document.metadata.get("raw_data", "{}")
     
     try:
         return json.loads(raw_data_str)
@@ -398,16 +417,23 @@ def prepare_context_for_llm(
     # =================================================================
     # 헤더는 이미 위에서 제거됨
     
-    # teams 메타데이터 파싱 (ChromaDB는 리스트를 쉼표 구분 문자열로 저장)
-    teams_raw = document.metadata.get("teams", "")
-    if isinstance(teams_raw, str):
-        teams_list = [t.strip() for t in teams_raw.split(",") if t.strip()]
+    # teams 메타데이터 파싱 (game 데이터는 home_team, away_team으로 저장됨)
+    home_team = document.metadata.get("home_team", "")
+    away_team = document.metadata.get("away_team", "")
+    
+    if home_team and away_team:
+        # game 데이터: home_team, away_team에서 팀 목록 구성
+        teams_list = [home_team, away_team]
     else:
-        teams_list = teams_raw if teams_raw else []
+        # season 데이터: team 필드 사용
+        team = document.metadata.get("team", "")
+        teams_list = [team] if team else []
     
     return {
         "type": document.metadata.get("type"),
         "teams": teams_list,
+        "home_team": home_team,
+        "away_team": away_team,
         "date": document.metadata.get("date"),
         "season": document.metadata.get("season"),
         "data": raw_data
@@ -439,9 +465,9 @@ def retrieve_for_query(
         Tuple[Optional[Dict], float, str]:
             (컨텍스트 데이터, 신뢰도 점수, 검색 방법)
     """
-    # 데이터 타입 결정
+    # 데이터 타입 결정 (DB에 저장된 타입명과 일치시킴)
     if query_type == "match_analysis":
-        data_type = "match"
+        data_type = "game"  # DB에는 "game"으로 저장됨
     elif query_type == "season_analysis":
         data_type = "season"
     else:
