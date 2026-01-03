@@ -476,78 +476,115 @@ def generate_descriptive_sentence(data: dict, data_type: str) -> str:
 
 ### ====== generate_game_description 함수 =====
 
-def generate_game_description(
-    date: str, 
-    team: str, 
-    opponent: str, 
-    players: List[Dict[str, Any]]
-) -> str:
+def summarize_team_pitchers(pitchers: List[Dict[str, Any]], team_name: str) -> str:
     """
-    특정 날짜, 특정 팀의 경기 전체 투수 기록을 요약하는 문장을 생성합니다.
-    입력:
-        date: "2025-05-05" 형태의 문자열
-        team: "Doosan" 등 팀명
-        opponent: "LG" 등 상대 팀명
-        players: 해당 경기에 등판한 투수들의 레코드 리스트
-    """
+    팀 투수진 기록을 요약합니다.
     
-    # 1. 날짜 포맷 변경 (2025-05-05 -> 2025년 5월 5일)
+    Args:
+        pitchers: 투수 레코드 리스트
+        team_name: 팀 이름
+    
+    Returns:
+        str: 투수진 요약 문자열
+    """
+    if not pitchers:
+        return f"{team_name}: 투수 기록 없음"
+    
+    summaries = []
+    total_ip = 0.0
+    total_er = 0
+    
+    for p in pitchers:
+        name = p.get('Name', 'Unknown')
+        result = p.get('Result', '')
+        
+        try:
+            ip = float(p.get('IP', 0))
+            er = int(p.get('ER', 0))
+            total_ip += ip
+            total_er += er
+        except (ValueError, TypeError):
+            ip, er = 0, 0
+        
+        if result:
+            summaries.append(f"{name}({result})")
+        else:
+            summaries.append(name)
+    
+    pitchers_text = ", ".join(summaries[:5])
+    if len(summaries) > 5:
+        pitchers_text += f" 외 {len(summaries)-5}명"
+    
+    return f"{team_name} 투수진({total_ip:.0f}이닝 {total_er}자책): {pitchers_text}"
+
+
+def generate_game_description(game_data: Dict[str, Any]) -> str:
+    """
+    경기 단위 문서의 설명 문장을 생성합니다.
+    양 팀 투수 기록을 하나의 문장으로 요약합니다.
+    
+    Args:
+        game_data: 경기별 그룹화된 데이터
+            - date, home_team, away_team, home_runs, away_runs
+            - home_pitchers: 홈팀 투수 리스트
+            - away_pitchers: 원정팀 투수 리스트
+    
+    Returns:
+        str: 임베딩용 설명 문장
+    
+    Example:
+        "2025년 04월 17일 Regular 시즌 경기: LG(홈) vs Lotte(원정). 
+         스코어 3-7 (Lotte 승리). 
+         LG 투수진(8이닝 7자책): 이민호(패), 김진성, 고우석. 
+         Lotte 투수진(9이닝 3자책): 반즈(승), 송재영, 박준우."
+    """
+    date = game_data.get('date', '')
+    home = game_data.get('home_team', 'Unknown')
+    away = game_data.get('away_team', 'Unknown')
+    home_runs = game_data.get('home_runs', '?')
+    away_runs = game_data.get('away_runs', '?')
+    season_type = game_data.get('season_type', 'Regular')
+    
+    # 날짜 포맷
     try:
         dt = datetime.strptime(date, "%Y-%m-%d")
         date_str = dt.strftime("%Y년 %m월 %d일")
     except ValueError:
-        date_str = date  # 포맷이 안 맞으면 그대로 사용
-
-    # 2. 투수별 기록 요약 및 팀 전체 스탯 계산
-    player_summaries = []
-    total_ip = 0.0
-    total_er = 0
-    game_result_keyword = "" # 승리/패배 여부 파악용
-
-    for p in players:
-        name = p.get("Name", "Unknown")
-        result = p.get("Result") # 승, 패, 세, 홀드 등 (없으면 None/null)
-        
-        # IP(이닝), ER(자책점) 데이터 가져오기 (문자열일 수 있으므로 처리)
-        try:
-            ip = float(p.get("IP", 0))
-            er = int(p.get("ER", 0))
-            total_ip += ip
-            total_er += er
-        except (ValueError, TypeError):
-            ip = 0
-            er = 0
-
-        # 투수 개별 요약 텍스트 생성
-        # 예: "이영하(승, 5이닝 2자책)" 또는 "김택연(1이닝 0자책)"
-        stats_txt = f"{ip}이닝 {er}자책"
-        
-        if result:
-            player_str = f"{name}({result}, {stats_txt})"
-            # 승패 정보 추출 (팀의 승패를 추론하기 위함)
-            if result == "승":
-                game_result_keyword = "승리"
-            elif result == "패" and not game_result_keyword: # 승리 투수가 없으면 패배로 기록
-                game_result_keyword = "패배"
+        date_str = date
+    
+    # 승패 결정
+    result = ""
+    try:
+        home_score = int(home_runs)
+        away_score = int(away_runs)
+        if home_score > away_score:
+            result = f"{home} 승리"
+        elif away_score > home_score:
+            result = f"{away} 승리"
         else:
-            player_str = f"{name}({stats_txt})"
-            
-        player_summaries.append(player_str)
-
-    # 3. 자연어 문장 생성
-    players_text = ", ".join(player_summaries)
+            result = "무승부"
+    except (ValueError, TypeError):
+        pass
     
-    # 문장 템플릿:
-    # "2025년 5월 5일, 두산이(가) LG를 상대로 치른 경기(승리)의 투수 기록입니다..."
-    intro = f"{date_str}, {team} 팀이 {opponent} 팀을 상대로 치른 경기"
-    
-    if game_result_keyword:
-        intro += f"({game_result_keyword})"
-    
-    description = (
-        f"{intro}의 투수 기록입니다. "
-        f"등판 투수: {players_text}. "
-        f"팀 합계: {total_ip}이닝 {total_er}자책점."
+    # 투수 요약 생성
+    home_summary = summarize_team_pitchers(
+        game_data.get('home_pitchers', []), home
     )
+    away_summary = summarize_team_pitchers(
+        game_data.get('away_pitchers', []), away
+    )
+    
+    # 최종 설명 문장
+    description = (
+        f"{date_str} {season_type} 시즌 경기: {home}(홈) vs {away}(원정). "
+        f"스코어 {home_runs}-{away_runs}"
+    )
+    
+    if result:
+        description += f" ({result}). "
+    else:
+        description += ". "
+    
+    description += f"{home_summary}. {away_summary}."
     
     return description

@@ -36,6 +36,8 @@ CHROMA_DB_DIR = DATA_DIR / "chroma_db"
 # 데이터 하위 폴더
 SEASON_DATA_DIR = RAW_DATA_DIR / "seasons"
 MATCH_DATA_DIR = RAW_DATA_DIR / "matches"
+PROCESSED_DATA_DIR = DATA_DIR / "processed" / "matches"  # 전처리된 경기별 데이터
+GAMELOG_DIR = DATA_DIR / "gamelog"  # 경기 일정 CSV
 
 # =============================================================================
 # ChromaDB 설정

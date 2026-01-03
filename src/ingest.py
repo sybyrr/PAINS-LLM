@@ -11,8 +11,6 @@ JSON 데이터를 로드하고 ChromaDB에 적재하는 기능을 제공합니�
 """
 
 import json
-import csv # 추가
-from itertools import groupby # 추가
 from pathlib import Path
 from typing import List, Dict, Optional
 from datetime import datetime
@@ -28,10 +26,10 @@ from .config import (
     COLLECTION_NAME, 
     EMBEDDING_MODEL,
     SEASON_DATA_DIR,
-    MATCH_DATA_DIR
+    MATCH_DATA_DIR,
+    PROCESSED_DATA_DIR
 )
 
-# from .utils import generate_descriptive_sentence, TEAM_EN_TO_KO
 from .utils import generate_game_description, TEAM_MAP
 
 # =============================================================================
@@ -272,177 +270,96 @@ def load_match_data(data_dir: Path = None) -> List[Dict]:
     return match_data
 
 
-# =============================================================================
-# 문서 변환 함수
-# =============================================================================
+# === 전처리된 경기별 데이터 로드 함수 ===
 
-def create_document_from_data(data: Dict, data_type: str) -> Document:
+def load_processed_game_data(data_dir: Path = None) -> List[Dict]:
     """
-    JSON 데이터를 LangChain Document로 변환합니다.
+    전처리된 경기별 JSON 데이터를 로드합니다.
     
-    핵심 전략 (논문 Section 4.2):
-    - page_content: 설명 문장 (임베딩 대상)
-    - metadata: 원본 JSON + 필터링용 메타데이터
+    preprocess.ipynb에서 생성한 data/processed/matches/ 폴더의 JSON 파일을 읽어옵니다.
+    각 JSON 파일은 경기별로 양 팀 투수 기록이 통합되어 있습니다.
     
     Args:
-        data: JSON 데이터
-        data_type: "season" 또는 "match"
+        data_dir: 전처리된 데이터 디렉토리 경로 (None일 경우 PROCESSED_DATA_DIR 사용)
     
     Returns:
-        Document: LangChain Document 객체
+        List[Dict]: 경기별 데이터 리스트
     """
-    # 1. 설명 문장 생성 (임베딩 대상)
-    descriptive_sentence = generate_descriptive_sentence(data, data_type)
+    if data_dir is None:
+        data_dir = PROCESSED_DATA_DIR
     
-    # Instruct 모델용 쿼리 포맷
-    # 논문 Section 4.4.1에서 검증된 방식
-    embedding_text = (
-        f"Instruct: Find the baseball dataset covering the given team(s) and statistics. "
-        f"Query: {descriptive_sentence}"
-    )
+    game_data = []
+    data_path = Path(data_dir)
     
-    # 2. 메타데이터 구성
-    metadata = {
-        "type": data_type,
-        "source_file": data.get("_source_file", ""),
-        "raw_data": json.dumps(data, ensure_ascii=False),  # 원본 JSON 저장
-    }
+    if not data_path.exists():
+        print(f"⚠️ 전처리된 데이터 디렉토리가 존재하지 않습니다: {data_path}")
+        print("   먼저 preprocess.ipynb를 실행하여 데이터를 전처리하세요.")
+        return game_data
     
-    # 시즌 데이터 메타데이터
-    if data_type == "season":
-        metadata["season"] = data.get("season", "2025")
-        metadata["team"] = data.get("Team", data.get("team", ""))
-        metadata["stat_type"] = data.get("_stat_type", "")
-        metadata["season_type"] = data.get("_season_type", "Regular")
-        metadata["player_name"] = data.get("Name", "")
-        # teams 필드: 메타데이터 필터링용 (ChromaDB는 리스트를 지원하지 않으므로 쉼표 구분 문자열로 저장)
-        if data.get("teams"):
-            metadata["teams"] = ",".join(data.get("teams"))
-        elif data.get("Team"):
-            metadata["teams"] = data.get("Team")
+    json_files = list(data_path.glob("*.json"))
+    print(f"📂 전처리된 데이터 파일 발견: {len(json_files)}개")
     
-    # 경기 데이터 메타데이터 (날짜+팀 그룹화된 투수/타자 기록)
-    elif data_type == "match":
-        metadata["date"] = data.get("date", data.get("Date", ""))
-        # teams 필드: ChromaDB는 리스트를 지원하지 않으므로 쉼표 구분 문자열로 저장
-        teams_list = data.get("teams", [])
-        metadata["teams"] = ",".join(teams_list) if teams_list else ""
-        metadata["team"] = data.get("Team", "")
-        metadata["season_type"] = data.get("_season_type", "Regular")
-        metadata["year"] = data.get("_year", "2025")
-        metadata["record_type"] = data.get("_record_type", "pitcher")
-        
-        # 그룹화된 선수 목록 (이름만 추출하여 저장)
-        players = data.get("players", [])
-        player_names = [p.get("Name", "") for p in players if p.get("Name")]
-        metadata["player_names"] = ",".join(player_names) if player_names else ""
-        metadata["player_count"] = len(players)
+    for json_file in json_files:
+        try:
+            with open(json_file, "r", encoding="utf-8") as f:
+                content = json.load(f)
+            
+            # JSON 구조: [ { "dataset_id": ..., "data": [...] }, ... ]
+            if isinstance(content, list):
+                for dataset in content:
+                    games = dataset.get('data', [])
+                    print(f"   - {json_file.name}: {len(games)}개 경기")
+                    game_data.extend(games)
+            
+        except json.JSONDecodeError as e:
+            print(f"❌ JSON 파싱 오류 ({json_file.name}): {e}")
+        except Exception as e:
+            print(f"❌ 파일 로드 오류 ({json_file.name}): {e}")
     
-    return Document(
-        page_content=embedding_text,
-        metadata=metadata
-    )
+    return game_data
 
-# === 추가한 함수 ===
 
-def load_schedule_mapping(csv_path: str) -> Dict[str, str]:
+def prepare_game_documents(game_data: List[Dict]) -> List[Document]:
     """
-    일정 CSV(src/games_2025.csv)를 읽어 (날짜_팀명) -> 상대팀명 매핑 딕셔너리를 반환합니다.
-    CSV의 한글 팀명을 TEAM_MAP을 통해 영문(공식명칭)으로 변환하여 매핑합니다.
-    """
-    mapping = {}
-    path = Path(csv_path)
+    전처리된 경기별 데이터를 LangChain Document로 변환합니다.
     
-    if not path.exists():
-        print(f"⚠️ 경고: 일정 파일이 없습니다. ({csv_path}) 상대 팀 정보가 누락됩니다.")
-        return mapping
-
-    print(f"📅 일정 데이터 로드 중: {csv_path}")
+    각 경기(양 팀 투수 기록 통합)에 대해 하나의 Document를 생성합니다.
     
-    try:
-        with open(path, 'r', encoding='utf-8-sig') as f: # utf-8-sig로 BOM 처리
-            reader = csv.DictReader(f)
-            for row in reader:
-                # CSV 컬럼명: date, season, home_team, away_team ...
-                date = row.get('date', '').strip()
-                home_raw = row.get('home_team', '').strip()
-                away_raw = row.get('away_team', '').strip()
-                
-                if not date or not home_raw or not away_raw:
-                    continue
-
-                # 한글 팀명을 영문 코드로 변환 (예: 두산 -> Doosan)
-                # TEAM_MAP에 없으면 원본 그대로 사용
-                home = TEAM_MAP.get(home_raw, home_raw)
-                away = TEAM_MAP.get(away_raw, away_raw)
-                
-                # 매핑 생성 (양방향)
-                # Key: "2025-05-05_Doosan" -> Value: "LG"
-                mapping[f"{date}_{home}"] = away
-                mapping[f"{date}_{away}"] = home
-                
-    except Exception as e:
-        print(f"⚠️ 일정 파일 로드 실패: {e}")
-        
-    return mapping
-
-# prepare_document 수정
-
-def prepare_documents(match_data: List[Dict], schedule_map: Dict[str, str]) -> List[Document]:
-    """
-    Match Data를 (날짜, 팀) 단위로 그룹화하고, 상대 팀 정보를 추가하여 Document를 생성합니다.
+    Args:
+        game_data: 경기별 데이터 리스트
+    
+    Returns:
+        List[Document]: LangChain Document 리스트
     """
     documents = []
     
-    # 1. 유효한 레코드 필터링 (필수 키가 있는 데이터만)
-    valid_records = [
-        r for r in match_data 
-        if r.get("Date") and r.get("Team")
-    ]
+    print(f"🔄 {len(game_data)}개의 경기 데이터를 Document로 변환 중...")
     
-    # 2. 각 레코드에 상대 팀(Opponent) 정보 매핑
-    for record in valid_records:
-        date = record['Date']     # 예: "2025-05-05"
-        team = record['Team']     # 예: "Doosan"
+    for game in game_data:
+        # 1. 설명 문장 생성 (임베딩 대상)
+        description = generate_game_description(game)
         
-        # 키 생성 (csv 로드 때와 동일한 규칙)
-        key = f"{date}_{team}"
-        
-        # 매핑에서 상대팀 찾기 (없으면 'Unknown')
-        record['Opponent'] = schedule_map.get(key, "Unknown")
-
-    # 3. 데이터 정렬 (groupby를 사용하기 위한 필수 전제 조건)
-    # 정렬 기준: 날짜 -> 팀 -> 상대팀
-    def key_func(x):
-        return (x['Date'], x['Team'], x['Opponent'])
-    
-    valid_records.sort(key=key_func)
-    
-    print(f"🔄 총 {len(valid_records)}개의 레코드를 경기 단위로 그룹화합니다...")
-    
-    # 4. 그룹화 및 Document 생성
-    for (date, team, opponent), group in groupby(valid_records, key=key_func):
-        # 제너레이터를 리스트로 변환 (해당 경기의 모든 투수 기록)
-        game_records = list(group)
-        
-        # 4-1. 자연어 설명 생성 (임베딩될 텍스트)
-        description = generate_game_description(date, team, opponent, game_records)
-        
-        # 4-2. 메타데이터 구성
-        # 원본 데이터(game_records)를 JSON 문자열로 변환하여 메타데이터에 저장
-        # 이렇게 하면 RAG 검색 후 원본 데이터를 다시 복원해서 쓸 수 있음
+        # 2. 메타데이터 구성
         metadata = {
-            "date": date,
-            "team": team,
-            "opponent": opponent,
-            "season": str(game_records[0].get("Season", "2025")),
-            "record_count": len(game_records),
-            "original_data": json.dumps(game_records, ensure_ascii=False)
+            "type": "game",
+            "game_id": game.get("game_id", ""),
+            "date": game.get("date", ""),
+            "home_team": game.get("home_team", ""),
+            "away_team": game.get("away_team", ""),
+            "teams": f"{game.get('home_team', '')},{game.get('away_team', '')}",
+            "home_runs": game.get("home_runs", ""),
+            "away_runs": game.get("away_runs", ""),
+            "season_type": game.get("season_type", "Regular"),
+            "home_pitcher_count": game.get("home_pitcher_count", 0),
+            "away_pitcher_count": game.get("away_pitcher_count", 0),
+            "total_pitcher_count": game.get("total_pitcher_count", 0),
+            # 원본 데이터 저장 (RAG 검색 후 복원용)
+            "original_data": json.dumps(game, ensure_ascii=False)
         }
         
         doc = Document(page_content=description, metadata=metadata)
         documents.append(doc)
-        
+    
     return documents
 
 
@@ -547,20 +464,22 @@ def clear_vector_store(persist_directory: str = None, collection_name: str = Non
 # =============================================================================
 
 def ingest_all_data(
-    season_dir: Path = None,
-    match_dir: Path = None,
+    processed_dir: Path = None,
     clear_existing: bool = True
 ) -> Chroma:
     """
-    모든 데이터를 로드하고 ChromaDB에 적재하는 메인 파이프라인입니다.
+    전처리된 경기별 데이터를 로드하고 ChromaDB에 적재하는 메인 파이프라인입니다.
     
     Args:
-        season_dir: 시즌 데이터 디렉토리 (None일 경우 config 기본값 사용)
-        match_dir: 경기 데이터 디렉토리 (None일 경우 config 기본값 사용)
+        processed_dir: 전처리된 데이터 디렉토리 (None일 경우 config 기본값 사용)
         clear_existing: 기존 데이터 삭제 여부 (기본값 True)
     
     Returns:
         Chroma: 초기화된 벡터 스토어
+    
+    Note:
+        이 함수 실행 전에 preprocess.ipynb를 먼저 실행하여 
+        data/processed/matches/ 폴더에 전처리된 JSON 파일을 생성해야 합니다.
     """
     print("=" * 60)
     print("🚀 KBO 데이터 적재 파이프라인 시작")
@@ -570,31 +489,26 @@ def ingest_all_data(
     if clear_existing:
         clear_vector_store()
     
-    # 2. 데이터 로드
-    print("\n📥 데이터 로드 중...")
+    # 2. 전처리된 경기별 데이터 로드
+    print("\n📥 전처리된 경기 데이터 로드 중...")
+    game_data = load_processed_game_data(processed_dir)
     
-    # (참고) 이번 로직은 '경기 단위' 기록에 집중하므로 시즌 데이터 로딩은 잠시 생략하거나
-    # 필요하다면 별도 로직으로 추가할 수 있습니다.
-    # season_data = load_season_data(season_dir) 
-    
-    match_data = load_match_data(match_dir)
-    
-    # [NEW] 일정 데이터 로드 (상대 팀 매핑용)
-    # 파일 위치가 바뀌면 이 경로만 수정하면 됩니다.
-    SCHEDULE_CSV_PATH = "src/games_2025.csv" 
-    schedule_map = load_schedule_mapping(SCHEDULE_CSV_PATH)
-    
-    if not match_data:
-        print("⚠️ 로드된 경기 데이터가 없습니다. 데이터 디렉토리를 확인하세요.")
+    if not game_data:
+        print("⚠️ 전처리된 경기 데이터가 없습니다.")
+        print("   먼저 preprocess.ipynb를 실행하여 데이터를 전처리하세요.")
         return None
     
     print(f"\n📊 로드된 데이터 요약:")
-    print(f"   - 경기 데이터(Match): {len(match_data)}건 (레코드 기준)")
-    print(f"   - 일정 데이터(Schedule): {len(schedule_map)//2}경기 정보 확보") # 양방향 매핑이므로 나누기 2
+    print(f"   - 경기 수: {len(game_data)}")
+    
+    # 시즌별 통계
+    regular_games = [g for g in game_data if g.get('season_type') == 'Regular']
+    post_games = [g for g in game_data if g.get('season_type') == 'Post']
+    print(f"   - 정규시즌: {len(regular_games)}경기")
+    print(f"   - 포스트시즌: {len(post_games)}경기")
     
     # 3. Document 변환
-    # 기존 코드와 달리, prepare_documents에 'match_data'와 'schedule_map'을 전달합니다.
-    documents = prepare_documents(match_data, schedule_map)
+    documents = prepare_game_documents(game_data)
     
     if not documents:
         print("⚠️ 생성된 문서가 없습니다. 데이터 무결성을 확인하세요.")
