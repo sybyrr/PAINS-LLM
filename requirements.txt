@@ -38,3 +38,6 @@ transformers==4.46.3
 torch==2.5.1
 torchvision==0.20.1
 torchaudio==2.5.1
+
+# 9. Visualization
+matplotlib>=3.8.0              # 시각화 (plt.show() 지원)

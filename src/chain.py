@@ -489,12 +489,12 @@ class KBOAnalysisChain:
             data = context.get("data", {})
             date = context.get("date", "")
             
-            if query_type == "match_analysis":
+            if query_type in ("match_analysis", "game"):
                 self._plot_match_analysis(context, data, date)
-            elif query_type == "season_analysis":
+            elif query_type in ("season_analysis", "season"):
                 self._plot_season_analysis(context, data)
             else:
-                print("⚠️ 시각화 미지원 쿼리 유형입니다.")
+                print(f"⚠️ 시각화 미지원 쿼리 유형입니다: {query_type}")
                 return
             
             plt.tight_layout()

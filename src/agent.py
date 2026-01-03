@@ -293,13 +293,24 @@ class KBOAgent:
             teams_str = " vs ".join(chain_result.teams) if chain_result.teams else "KBO"
             title = f"{teams_str} 분석 대시보드"
             
+            # season 값 추출 (None이면 기본값 사용)
+            season = None
+            if chain_result.context:
+                season = chain_result.context.get("season")
+                # 날짜에서 연도 추출 시도
+                if not season and chain_result.context.get("date"):
+                    date_str = chain_result.context.get("date")
+                    if date_str and len(date_str) >= 4:
+                        season = date_str[:4]  # "2025-06-15" -> "2025"
+            season = season or "2025"  # 최종 기본값
+            
             # 대시보드 생성
             dashboard = generate_dashboard_json.invoke({
                 "dashboard_type": dashboard_type,
                 "teams": chain_result.teams,
                 "title": title,
                 "date": chain_result.context.get("date") if chain_result.context else None,
-                "season": chain_result.context.get("season", "2025") if chain_result.context else "2025",
+                "season": season,
             })
             
             return dashboard
@@ -442,7 +453,14 @@ def run_interactive_chat():
                     "teams": response.retrieved_doc_info.get("teams"),
                     "data": response.context_used.get("data", {}) if isinstance(response.context_used, dict) else {}
                 }
-                last_query_type = response.retrieved_doc_info.get("type")
+                # 문서 타입을 쿼리 유형으로 매핑 (game -> match_analysis, season -> season_analysis)
+                doc_type = response.retrieved_doc_info.get("type")
+                if doc_type == "game":
+                    last_query_type = "match_analysis"
+                elif doc_type == "season":
+                    last_query_type = "season_analysis"
+                else:
+                    last_query_type = doc_type
                 last_teams = response.retrieved_doc_info.get("teams", [])
             
             # 검색 정보 출력
