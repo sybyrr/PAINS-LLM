@@ -469,12 +469,16 @@ def clean_query_for_embedding(
     
     elif query_type == "season_analysis":
         # 시즌 분석: 선수명이 포함된 경우와 팀 분석의 경우를 구분
+        # 번역된 쿼리에 선수 이름이 있는 경우, 그 선수 이름을 중심으로 검색
+        # 형식: "{PlayerName} 2025 season pitching stats" (Description과 유사한 형태)
         if teams:
-            # 번역된 쿼리에 팀명이 아닌 다른 정보(선수명 등)가 있는지 확인
-            # translated에서 팀명을 제외한 나머지가 선수 정보
-            return f"Find dataset for {teams[0]} player season stats. {translated}"
+            # 팀이 지정된 경우: 팀 정보도 포함
+            return f"{translated}. Team: {teams[0]}. KBO baseball pitcher season statistics."
         else:
-            return f"Find dataset for player season stats. {translated}"
+            # 팀이 지정되지 않은 경우: 선수 이름으로만 검색
+            # translated에 선수 이름과 "season stats" 등이 포함되어 있음
+            # Description 형식에 맞추어 검색 성능 향상
+            return f"{translated}. KBO baseball pitcher season statistics."
     
     else:
         # 기본: 번역된 쿼리 사용
@@ -491,7 +495,8 @@ def build_metadata_filter(
     ChromaDB 메타데이터 필터를 생성합니다.
     
     게임 데이터는 home_team, away_team 필드로 저장되어 있습니다.
-    팀 필터는 $or 연산자로 home_team 또는 away_team에 매칭합니다.
+    시즌 데이터는 team 필드로 저장되어 있습니다.
+    팀 필터는 데이터 유형에 따라 적절한 필드로 매칭합니다.
     
     Args:
         teams: 필터링할 팀 목록
@@ -507,26 +512,55 @@ def build_metadata_filter(
     if data_type:
         conditions.append({"type": data_type})
     
-    # 팀 필터: home_team 또는 away_team에 매칭
+    # 팀 필터: 데이터 유형에 따라 다른 필드 사용
     if teams:
-        if len(teams) == 1:
-            # 단일 팀: home 또는 away에 해당 팀이 있으면 됨
-            team = teams[0]
-            conditions.append({
-                "$or": [
-                    {"home_team": team},
-                    {"away_team": team}
-                ]
-            })
-        elif len(teams) == 2:
-            # 두 팀: 두 팀이 모두 경기에 참여해야 함
-            # (team1이 home이고 team2가 away) OR (team1이 away이고 team2가 home)
-            conditions.append({
-                "$or": [
-                    {"$and": [{"home_team": teams[0]}, {"away_team": teams[1]}]},
-                    {"$and": [{"home_team": teams[1]}, {"away_team": teams[0]}]}
-                ]
-            })
+        if data_type == "season":
+            # 시즌 데이터: team 필드 사용 (각 선수별 문서)
+            if len(teams) == 1:
+                conditions.append({"team": teams[0]})
+            else:
+                # 여러 팀인 경우 OR로 결합
+                conditions.append({
+                    "$or": [{"team": team} for team in teams]
+                })
+        elif data_type == "game":
+            # 게임 데이터: home_team, away_team 필드 사용
+            if len(teams) == 1:
+                # 단일 팀: home 또는 away에 해당 팀이 있으면 됨
+                team = teams[0]
+                conditions.append({
+                    "$or": [
+                        {"home_team": team},
+                        {"away_team": team}
+                    ]
+                })
+            elif len(teams) == 2:
+                # 두 팀: 두 팀이 모두 경기에 참여해야 함
+                # (team1이 home이고 team2가 away) OR (team1이 away이고 team2가 home)
+                conditions.append({
+                    "$or": [
+                        {"$and": [{"home_team": teams[0]}, {"away_team": teams[1]}]},
+                        {"$and": [{"home_team": teams[1]}, {"away_team": teams[0]}]}
+                    ]
+                })
+        else:
+            # 데이터 타입이 지정되지 않은 경우: 두 가지 경우 모두 고려
+            if len(teams) == 1:
+                team = teams[0]
+                conditions.append({
+                    "$or": [
+                        {"team": team},
+                        {"home_team": team},
+                        {"away_team": team}
+                    ]
+                })
+            elif len(teams) == 2:
+                conditions.append({
+                    "$or": [
+                        {"$and": [{"home_team": teams[0]}, {"away_team": teams[1]}]},
+                        {"$and": [{"home_team": teams[1]}, {"away_team": teams[0]}]}
+                    ]
+                })
     
     if date:
         conditions.append({"date": date})

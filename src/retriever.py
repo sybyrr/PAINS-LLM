@@ -71,13 +71,17 @@ def translate_query_to_english(query: str) -> str:
                 "content": (
                     "You are a translator for KBO (Korean Baseball Organization) queries. "
                     "Translate the Korean query completely to English:\n"
-                    "1. Romanize player names (e.g., 류현진 → Ryu Hyun-jin, 후라도 → Hueraldo)\n"
+                    "1. Romanize player names exactly as they would appear in KBO records:\n"
+                    "   - Korean players: 류현진 → Ryu Hyun-jin, 구창모 → Koo Chang-mo\n"
+                    "   - Foreign players: 감보아 → Gamboa, 후라도 → Hueraldo, 에르난데스 → Hernandez\n"
                     "2. Translate team names (e.g., 한화 → Hanwha, 롯데 → Lotte)\n"
                     "3. Translate baseball terms (e.g., 시즌 성적 → season stats, 방어율 → ERA)\n"
                     "4. Remove adjectives/filler words (e.g., '진짜 잘하는' → remove)\n"
                     "5. Output ONLY the translated query, nothing else.\n\n"
                     "Examples:\n"
                     "- '류현진 2025 시즌 성적' → 'Ryu Hyun-jin 2025 season stats'\n"
+                    "- '감보아 2025시즌 성적' → 'Gamboa 2025 season stats'\n"
+                    "- '에르난데스 시즌 분석' → 'Hernandez season analysis'\n"
                     "- '진짜 잘하는 후라도 2025시즌 성적' → 'Hueraldo 2025 season stats'\n"
                     "- '한화 이글스 올시즌 투수 분석' → 'Hanwha Eagles this season pitching analysis'"
                 )
@@ -275,13 +279,22 @@ def hybrid_search(
     if teams:
         filtered_results = []
         for doc, score in semantic_results:
-            home_team = doc.metadata.get("home_team", "")
-            away_team = doc.metadata.get("away_team", "")
-            doc_teams = {home_team, away_team}
+            doc_type = doc.metadata.get("type", "")
             
-            # 요청된 모든 팀이 home_team 또는 away_team에 있는지 확인
-            if all(team in doc_teams for team in teams):
-                filtered_results.append((doc, score))
+            if doc_type == "season":
+                # 시즌 데이터: team 필드 사용
+                doc_team = doc.metadata.get("team", "")
+                if any(team == doc_team for team in teams):
+                    filtered_results.append((doc, score))
+            else:
+                # 게임 데이터: home_team, away_team 필드 사용
+                home_team = doc.metadata.get("home_team", "")
+                away_team = doc.metadata.get("away_team", "")
+                doc_teams = {home_team, away_team}
+                
+                # 요청된 모든 팀이 home_team 또는 away_team에 있는지 확인
+                if all(team in doc_teams for team in teams):
+                    filtered_results.append((doc, score))
         
         if filtered_results:
             semantic_results = filtered_results
