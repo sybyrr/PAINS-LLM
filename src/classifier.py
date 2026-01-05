@@ -62,10 +62,11 @@ CLASSIFICATION_PROMPT = """당신은 KBO 한국 프로야구 데이터 분석 �
    - 특정 데이터 조회가 필요 없는 질문
    - 인사, 잡담
 
-2. **season_analysis** (시즌 분석)
-   - 팀 시즌 성적, 순위, 누적 통계
-   - 예: "한화 올시즌 성적 어때?", "LG 타선 분석해줘", "두산 투수진 ERA"
-   - 키워드: 시즌, 올해, 순위, 전체, 누적, 분석
+2. **season_analysis** (시즌 분석) - 선수의 시즌 성적 조회
+   - **선수 개인 시즌 성적, 통계 조회** (핵심!)
+   - 예: "김택연 2024 성적", "류현진 시즌 분석", "2025년 원태인 성적"
+   - 키워드: 시즌, 올해, 순위, 전체, 누적, 분석, 성적, 통계
+   - **주의**: 선수 이름만 언급되어도 성적/분석/통계를 요청하면 season_analysis로 분류
 
 3. **match_analysis** (경기 분석)
    - 특정 경기 결과 또는 예정 경기
@@ -114,6 +115,20 @@ CLASSIFICATION_PROMPT = """당신은 KBO 한국 프로야구 데이터 분석 �
 → reasoning_steps: "1. '올시즌'으로 시즌 전체 분석 요청. 2. 'LG' 팀 언급됨. 3. '타선 분석'은 시즌 누적 통계 필요. 4. 시즌 분석으로 분류."
 → query_type: "season_analysis"
 → teams: ["LG"]
+→ date: null
+→ confidence: 0.92
+
+쿼리: "2024년 김택연 성적"
+→ reasoning_steps: "1. '김택연'은 선수 이름임. 2. '2024년'은 특정 시즌을 의미. 3. '성적'은 시즌 누적 통계 조회 요청. 4. 선수 개인 시즌 성적 조회이므로 season_analysis로 분류."
+→ query_type: "season_analysis"
+→ teams: []
+→ date: null
+→ confidence: 0.90
+
+쿼리: "류현진 시즌 분석"
+→ reasoning_steps: "1. '류현진'은 선수 이름. 2. '시즌 분석'은 시즌 누적 통계 요청. 3. 선수 개인 시즌 성적 조회이므로 season_analysis로 분류."
+→ query_type: "season_analysis"
+→ teams: []
 → date: null
 → confidence: 0.92
 
@@ -225,7 +240,7 @@ class QueryClassifier:
         
         # 분류 규칙
         match_keywords = ["경기", "어제", "오늘", "내일", "vs", "대", "맞대결", "결과"]
-        season_keywords = ["시즌", "올해", "순위", "전체", "누적", "분석", "성적", "통계"]
+        season_keywords = ["시즌", "올해", "순위", "전체", "누적", "분석", "성적", "통계", "년"]
         general_keywords = ["뭐", "무엇", "어떻게", "왜", "설명", "알려"]
         
         # 키워드 매칭
@@ -242,6 +257,11 @@ class QueryClassifier:
             query_type = "season_analysis"
             confidence = 0.7
             reasoning = "시즌 분석 키워드와 팀명 감지됨 (규칙 기반)"
+        elif has_season_keyword and not has_general_keyword:
+            # 선수 성적 조회 등: 팀 없이 시즌/성적 키워드만 있는 경우
+            query_type = "season_analysis"
+            confidence = 0.65
+            reasoning = "시즌/성적 분석 키워드 감지됨 (선수 개인 성적 조회 추정, 규칙 기반)"
         elif team_names and not has_general_keyword:
             # 팀만 언급된 경우 시즌 분석으로 기본 분류
             query_type = "season_analysis"
