@@ -11,7 +11,7 @@ Classifier module - 쿼리 분류 및 의도 파악
 """
 
 import json
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Tuple, Any
 from pydantic import BaseModel, Field
 
 from langchain_openai import ChatOpenAI
@@ -321,6 +321,138 @@ def classify_query(query: str) -> ClassificationResult:
     """
     classifier = get_classifier()
     return classifier.classify(query)
+
+
+# =============================================================================
+# 선질문 (Pre-question) 생성 및 사용자 선택 기반 분류
+# =============================================================================
+
+def generate_pre_question() -> str:
+    """
+    사용자에게 질문 유형을 선택하게 하는 선질문을 생성합니다.
+    
+    제일 처음 사용자에게 질문 유형을 물어보고,
+    그 응답에 따라 API 호출 또는 RAG 사용을 결정합니다.
+    
+    Returns:
+        str: 사용자에게 제시할 선질문 텍스트
+    
+    Example:
+        >>> pre_question = generate_pre_question()
+        >>> print(pre_question)
+        "어떤 유형의 질문이신가요?
+        1) 일반 질문
+        2) 선수의 시즌 성적
+        3) 특정 경기 분석"
+    """
+    pre_question = """어떤 유형의 질문이신가요?
+
+1️⃣ 일반 질문 (야구 규칙, 용어 설명, 일반 상식)
+   예: "OPS가 뭐야?", "WAR는 어떻게 계산해?", "야구 규칙 설명해줄래?"
+
+2️⃣ 선수의 시즌 성적 (특정 선수의 시즌 통계 및 분석)
+   예: "김택연 2024 성적", "류현진 올해 성적", "원태인 2025 시즌 분석"
+
+3️⃣ 특정 경기 분석 (경기 결과, 선수 활약, 경기 통계)
+   예: "어제 한화 LG 경기 어땠어?", "5월 1일 삼성 경기 결과"
+
+➡️ 답변: 1, 2, 또는 3 입력"""
+    
+    return pre_question
+
+
+class PreQuestionChoice:
+    """사용자의 선질문 응답을 파싱하는 클래스"""
+    
+    # 매핑: 사용자 입력 → query_type
+    CHOICE_MAPPING = {
+        # 숫자
+        "1": "general",
+        "2": "season_analysis",
+        "3": "match_analysis",
+        # 한글 약자
+        "일반": "general",
+        "분석": "season_analysis",
+        "경기": "match_analysis",
+        # 전체 단어
+        "일반질문": "general",
+        "시즌분석": "season_analysis",
+        "시즌": "season_analysis",
+        "경기분석": "match_analysis",
+        "경기": "match_analysis",
+    }
+    
+    @staticmethod
+    def parse_choice(user_input: str) -> Optional[str]:
+        """
+        사용자 입력을 파싱하여 query_type을 반환합니다.
+        
+        Args:
+            user_input: 사용자 입력 ("1", "2", "3", "일반", "분석", "경기" 등)
+        
+        Returns:
+            Optional[str]: query_type ("general", "season_analysis", "match_analysis")
+                          또는 None (인식 불가능한 입력)
+        
+        Example:
+            >>> PreQuestionChoice.parse_choice("1")
+            "general"
+            >>> PreQuestionChoice.parse_choice("분석")
+            "season_analysis"
+            >>> PreQuestionChoice.parse_choice("xyz")
+            None
+        """
+        normalized = user_input.strip().lower()
+        return PreQuestionChoice.CHOICE_MAPPING.get(normalized)
+
+
+def classify_by_user_choice(
+    query: str,
+    user_choice: str
+) -> ClassificationResult:
+    """
+    사용자의 선질문 응답을 기반으로 쿼리를 분류합니다.
+    
+    API 호출 없이 사용자 입력으로 직접 분류하므로 빠릅니다.
+    
+    Args:
+        query: 사용자의 원본 질문
+        user_choice: 선질문에 대한 사용자의 답변 ("1", "2", "3" 등)
+    
+    Returns:
+        ClassificationResult: 분류 결과
+    
+    Raises:
+        ValueError: 인식 불가능한 선택지인 경우
+    
+    Example:
+        >>> result = classify_by_user_choice("한화 성적", "2")
+        >>> print(result.query_type)
+        "season_analysis"
+        >>> print(result.confidence)
+        1.0  # 사용자 선택이므로 신뢰도 100%
+    """
+    # 사용자 선택 파싱
+    query_type = PreQuestionChoice.parse_choice(user_choice)
+    
+    if query_type is None:
+        raise ValueError(
+            f"인식 불가능한 선택입니다: '{user_choice}'\n"
+            f"1 (일반), 2 (분석), 3 (경기) 중 선택해주세요."
+        )
+    
+    # 팀/날짜 추출 (여전히 필요)
+    teams = extract_teams_from_query(query)
+    team_names = [t[0] for t in teams]
+    date = extract_date_from_query(query) if query_type in ["match_analysis", "season_analysis"] else None
+    
+    return ClassificationResult(
+        reasoning_steps=f"사용자 선택: {user_choice} → {query_type}",
+        query_type=query_type,
+        teams=team_names,
+        date=date,
+        confidence=1.0  # 사용자 선택이므로 완벽한 신뢰도
+    )
 
 
 # =============================================================================

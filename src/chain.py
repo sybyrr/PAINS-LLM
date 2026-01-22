@@ -768,12 +768,14 @@ class KBOAnalysisChain:
             ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.1,
                     str(val), ha='center', va='bottom', fontsize=10)
     
-    def run(self, query: str, show_plot: bool = False) -> ChainResult:
+    def run(self, query: str, classification: Optional[ClassificationResult] = None, show_plot: bool = False) -> ChainResult:
         """
         전체 체인을 실행합니다.
         
         Args:
             query: 사용자 쿼리
+            classification: 미리 분류된 결과 (선질문에서 받은 사용자 선택)
+                           None이면 LLM으로 자동 분류 (기존 방식)
             show_plot: True이면 matplotlib 창으로 시각화 표시
         
         Returns:
@@ -788,8 +790,14 @@ class KBOAnalysisChain:
         print(f"📝 정규화된 팀: {normalized_teams}")
         
         # 2. 분류
-        classification = classify_query(query)
-        print(f"🏷️ 분류: {classification.query_type} (신뢰도: {classification.confidence:.2f})")
+        if classification is None:
+            # 자동 분류 (API 호출)
+            classification = classify_query(query)
+            print(f"🏷️ 분류 (자동): {classification.query_type} (신뢰도: {classification.confidence:.2f})")
+        else:
+            # 사용자 선택 기반 분류 (API 호출 없음)
+            print(f"🏷️ 분류 (사용자 선택): {classification.query_type} (신뢰도: {classification.confidence:.2f})")
+        
         print(f"📅 날짜: {classification.date}")
         
         # 팀 정보 병합 (분류기 + 정규화)
@@ -888,12 +896,14 @@ def get_chain() -> KBOAnalysisChain:
     return _chain_instance
 
 
-def run_analysis(query: str, show_plot: bool = False) -> ChainResult:
+def run_analysis(query: str, classification: Optional[ClassificationResult] = None, show_plot: bool = False) -> ChainResult:
     """
     분석 체인을 실행하는 편의 함수
     
     Args:
         query: 사용자 쿼리
+        classification: 미리 분류된 결과 (선질문에서 받은 사용자 선택)
+                       None이면 LLM으로 자동 분류 (기존 방식)
         show_plot: True이면 matplotlib 창으로 시각화 표시
     
     Returns:
@@ -904,11 +914,21 @@ def run_analysis(query: str, show_plot: bool = False) -> ChainResult:
         >>> result = run_analysis("한화 올시즌 타선 분석해줘")
         >>> print(result.response)
         
+        # 사용자 선택 기반 분류
+        >>> from src.classifier import classify_by_user_choice
+        >>> user_classification = classify_by_user_choice("한화 성적", "2")
+        >>> result = run_analysis("한화 성적", user_classification)
+        
         # matplotlib 창으로 시각화
         >>> result = run_analysis("6월 25일 롯데 NC 경기 분석해줘", show_plot=True)
     """
     chain = get_chain()
-    return chain.run(query, show_plot=show_plot)
+    
+    # 분류 결과가 없으면 자동 분류
+    if classification is None:
+        classification = classify_query(query)
+    
+    return chain.run(query, classification, show_plot=show_plot)
 
 
 # =============================================================================

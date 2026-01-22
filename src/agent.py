@@ -23,6 +23,7 @@ from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from .config import LLM_MODEL, OPENAI_API_KEY, TEMPERATURE
 from .chain import run_analysis, ChainResult
 from .tools import get_tools, generate_dashboard_json
+from .utils import extract_teams_from_query, extract_date_from_query
 
 
 # =============================================================================
@@ -167,21 +168,63 @@ class KBOAgent:
             max_iterations=5,
         )
     
-    def chat(self, query: str) -> AgentResponse:
+    def chat(self, query: str, query_type: str = None) -> AgentResponse:
         """
         사용자 쿼리에 응답합니다.
         
         Args:
             query: 사용자 쿼리
+            query_type: 미리 결정된 쿼리 타입 ("1", "2", "3" 또는 "general", "season_analysis", "match_analysis")
+                       None이면 LLM으로 자동 분류 (기존 방식)
         
         Returns:
             AgentResponse: 에이전트 응답
         """
         try:
-            # 1. 분석 체인 실행 (분류 + 검색 + 응답 생성)
-            chain_result = run_analysis(query)
+            # 1. 분류 수행
+            if query_type:
+                # 사용자가 선질문에서 선택한 타입으로 분류
+                from .classifier import PreQuestionChoice, classify_by_user_choice
+                
+                # 사용자 입력이 "1", "2", "3" 같은 숫자인 경우 먼저 파싱
+                if query_type in ["1", "2", "3"]:
+                    parsed_type = PreQuestionChoice.parse_choice(query_type)
+                    if parsed_type is None:
+                        return AgentResponse(
+                            query=query,
+                            response=f"❌ 인식 불가능한 선택입니다: '{query_type}'",
+                            error=f"인식 불가능한 선택입니다: '{query_type}'"
+                        )
+                    classification = classify_by_user_choice(query, query_type)
+                else:
+                    # 이미 파싱된 타입이면 직접 사용
+                    if query_type not in ["general", "season_analysis", "match_analysis"]:
+                        return AgentResponse(
+                            query=query,
+                            response=f"❌ 인식 불가능한 질문 타입입니다: '{query_type}'",
+                            error=f"인식 불가능한 질문 타입입니다: '{query_type}'"
+                        )
+                    # 이미 파싱된 타입을 기반으로 직접 분류 결과 생성
+                    from .classifier import ClassificationResult, extract_teams_from_query, extract_date_from_query
+                    teams = extract_teams_from_query(query)
+                    team_names = [t[0] for t in teams]
+                    date = extract_date_from_query(query) if query_type in ["match_analysis", "season_analysis"] else None
+                    classification = ClassificationResult(
+                        reasoning_steps=f"사용자 선택: {query_type}",
+                        query_type=query_type,
+                        teams=team_names,
+                        date=date,
+                        confidence=1.0
+                    )
+            else:
+                # 기존 방식: LLM으로 자동 분류
+                from .classifier import classify_query
+                classification = classify_query(query)
             
-            # 2. 응답 결정
+            # 2. 분석 체인 실행 (분류 결과를 전달)
+            chain_result = run_analysis(query, classification)
+            
+            # 3. 응답 결정
             # chain에서 이미 완성된 응답을 사용 (데이터 분석 쿼리인 경우)
             if chain_result.context and chain_result.query_type != "general":
                 # 분석 쿼리: chain의 응답 직접 사용 (데이터 잘림 방지)
@@ -355,12 +398,14 @@ def get_agent() -> KBOAgent:
     return _agent_instance
 
 
-def chat(query: str) -> AgentResponse:
+def chat(query: str, query_type: str = None) -> AgentResponse:
     """
     챗봇과 대화하는 편의 함수
     
     Args:
         query: 사용자 쿼리
+        query_type: 미리 결정된 쿼리 타입 (선질문에서 받은 사용자 선택)
+                   None이면 LLM으로 자동 분류
     
     Returns:
         AgentResponse: 에이전트 응답
@@ -369,9 +414,13 @@ def chat(query: str) -> AgentResponse:
         >>> from src.agent import chat
         >>> response = chat("한화 올시즌 성적 어때?")
         >>> print(response.response)
+        
+        # 사용자 선택 기반 분류
+        >>> response = chat("한화 성적", "2")  # 2 = 시즌 분석
+        >>> print(response.response)
     """
     agent = get_agent()
-    return agent.chat(query)
+    return agent.chat(query, query_type)
 
 
 # =============================================================================
@@ -379,7 +428,7 @@ def chat(query: str) -> AgentResponse:
 # =============================================================================
 
 def run_interactive_chat():
-    """대화형 CLI 챗봇 실행"""
+    """대화형 CLI 챗봇 실행 - 사용자 질문 유형 선택 기반"""
     print("=" * 60)
     print("🎯 KBO 야구 분석 챗봇")
     print("=" * 60)
@@ -393,7 +442,7 @@ def run_interactive_chat():
     print("=" * 60)
     
     agent = KBOAgent()
-    last_context = None  # 마지막 분석 컨텍스트 저장
+    last_context = None
     last_query_type = None
     last_teams = None
     
@@ -424,7 +473,7 @@ def run_interactive_chat():
             elif user_input.lower() == "/plot":
                 # 마지막 분석 결과 시각화
                 if last_context and last_query_type:
-                    from src.chain import get_chain
+                    from .chain import get_chain
                     chain = get_chain()
                     chain._show_visualization(
                         query_type=last_query_type,
@@ -438,12 +487,41 @@ def run_interactive_chat():
             # "시각화", "plot", "차트" 키워드 체크
             show_plot = any(kw in user_input.lower() for kw in ['시각화', 'plot', '차트', '그래프'])
             
-            # 챗봇 응답
-            print("\n🤖 Assistant: ", end="")
-            response = agent.chat(user_input)
+            # =================================================================
+            # 질문 유형 선택 단계: 사용자가 제일 처음 선택
+            # =================================================================
+            from .classifier import generate_pre_question, PreQuestionChoice
+            
+            print(f"\n{generate_pre_question()}")
+            
+            # 사용자 선택 입력받기
+            while True:
+                user_choice = input("\n➡️ 선택 (1/2/3): ").strip()
+                
+                if not user_choice:
+                    print("⚠️ 선택을 입력해주세요 (1, 2, 또는 3)")
+                    continue
+                
+                # 유효성 검사 (1, 2, 3만 가능)
+                if user_choice not in ["1", "2", "3"]:
+                    print("⚠️ 인식 불가능한 선택입니다. 1, 2, 3 중 선택해주세요.")
+                    continue
+                
+                # 유효한 선택이면 그대로 사용 (파싱은 agent.chat에서)
+                query_choice = user_choice
+                break  # 유효한 선택 받음
+            
+            # =================================================================
+            # 분석 단계: 선택된 유형에 따라 처리
+            # - 1 (일반 질문) → API만 호출
+            # - 2 (선수 시즌 성적) → RAG 검색 + API
+            # - 3 (특정 경기 분석) → RAG 검색 + API
+            # =================================================================
+            print("\n🤖 Assistant: ", end="", flush=True)
+            response = agent.chat(user_input, query_choice)
             print(response.response)
             
-            # 컨텍스트 저장 (나중에 /plot 명령어용)
+            # 컨텍스트 저장
             if response.context_used and response.retrieved_doc_info:
                 last_context = {
                     "type": response.retrieved_doc_info.get("type"),
@@ -453,7 +531,6 @@ def run_interactive_chat():
                     "teams": response.retrieved_doc_info.get("teams"),
                     "data": response.context_used.get("data", {}) if isinstance(response.context_used, dict) else {}
                 }
-                # 문서 타입을 쿼리 유형으로 매핑 (game -> match_analysis, season -> season_analysis)
                 doc_type = response.retrieved_doc_info.get("type")
                 if doc_type == "game":
                     last_query_type = "match_analysis"
@@ -463,9 +540,9 @@ def run_interactive_chat():
                     last_query_type = doc_type
                 last_teams = response.retrieved_doc_info.get("teams", [])
             
-            # 검색 정보 출력
-            if response.context_used:
-                print(f"\n📑 참조 문서 (유사도: {response.retrieval_score:.2%}, 방법: {response.retrieval_method})")
+            # 검색 정보 출력 (분석 질문인 경우만)
+            if response.context_used and query_choice in ["2", "3"]:
+                print(f"\n📑 검색 정보 (유사도: {response.retrieval_score:.2%}, 방법: {response.retrieval_method})")
                 if response.retrieved_doc_info:
                     doc = response.retrieved_doc_info
                     info_parts = []
@@ -481,7 +558,7 @@ def run_interactive_chat():
             
             # 키워드로 시각화 요청한 경우
             if show_plot and last_context and last_query_type:
-                from src.chain import get_chain
+                from .chain import get_chain
                 chain = get_chain()
                 chain._show_visualization(
                     query_type=last_query_type,
@@ -494,11 +571,12 @@ def run_interactive_chat():
                 print("\n📊 대시보드가 생성되었습니다!")
                 print(f"   위젯 수: {len(response.dashboard.get('widgets', []))}")
                 print("   💡 '/plot' 명령어로 시각화할 수 있습니다.")
+                print(f"   위젯 수: {len(response.dashboard.get('widgets', []))}")
             
-            # 도구 호출 정보
-            if response.tool_calls:
-                print(f"\n🔧 사용된 도구: {[t['tool'] for t in response.tool_calls]}")
-                
+            # 오류 처리
+            if response.error:
+                print(f"\n⚠️ 오류 발생: {response.error}")
+        
         except KeyboardInterrupt:
             print("\n👋 종료합니다.")
             break
