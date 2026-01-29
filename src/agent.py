@@ -448,12 +448,77 @@ def run_interactive_chat():
     
     while True:
         try:
+            # =================================================================
+            # 질문 유형 선택 단계: LLM이 제일 처음 질문 유형을 묻고 사용자가 선택
+            # =================================================================
+            from .classifier import generate_pre_question, PreQuestionChoice
+            
+            print(f"\n{generate_pre_question()}")
+            
+            # 사용자 선택 입력받기 (질문 전에)
+            while True:
+                user_choice = input("\n➡️ 선택 (1/2/3): ").strip()
+                
+                if not user_choice:
+                    print("⚠️ 선택을 입력해주세요 (1, 2, 또는 3)")
+                    continue
+                
+                # 명령어 확인 (선택 단계에서도 명령어 처리 가능)
+                if user_choice.lower() == "/quit":
+                    print("👋 안녕히 가세요!")
+                    exit(0)
+                elif user_choice.lower() == "/reset":
+                    agent.reset_memory()
+                    last_context = None
+                    last_query_type = None
+                    last_teams = None
+                    print("💭 대화 기록이 초기화되었습니다.")
+                    break  # 선택 루프 탈출, 다시 선질문으로
+                elif user_choice.lower() == "/history":
+                    history = agent.get_conversation_history()
+                    print("\n📜 대화 기록:")
+                    for msg in history:
+                        role = "👤" if msg["role"] == "user" else "🤖"
+                        print(f"{role}: {msg['content'][:100]}...")
+                    print()  # 다시 선택 입력하도록
+                    continue
+                elif user_choice.lower() == "/plot":
+                    # 마지막 분석 결과 시각화
+                    if last_context and last_query_type:
+                        from .chain import get_chain
+                        chain = get_chain()
+                        chain._show_visualization(
+                            query_type=last_query_type,
+                            teams=last_teams or [],
+                            context=last_context
+                        )
+                    else:
+                        print("⚠️ 시각화할 분석 결과가 없습니다. 먼저 경기나 시즌 분석 질문을 해주세요.")
+                    print()  # 다시 선택 입력하도록
+                    continue
+                
+                # 유효성 검사 (1, 2, 3만 가능)
+                if user_choice not in ["1", "2", "3"]:
+                    print("⚠️ 인식 불가능한 선택입니다. 1, 2, 3 중 선택해주세요.")
+                    continue
+                
+                # 유효한 선택이면 그대로 사용 (파싱은 agent.chat에서)
+                query_choice = user_choice
+                break  # 유효한 선택 받음
+            
+            # 선택이 완료되면 다시 루프 처음으로 돌아가는 경우 처리 (예: /reset)
+            if user_choice.lower() == "/reset":
+                continue
+            
+            # =================================================================
+            # 질문 입력 단계: 선택 후 사용자가 질문을 입력
+            # =================================================================
             user_input = input("\n👤 You: ").strip()
             
             if not user_input:
                 continue
             
-            # 명령어 처리
+            # 명령어 처리 (질문 입력 단계에서도)
             if user_input.lower() == "/quit":
                 print("👋 안녕히 가세요!")
                 break
@@ -486,30 +551,6 @@ def run_interactive_chat():
             
             # "시각화", "plot", "차트" 키워드 체크
             show_plot = any(kw in user_input.lower() for kw in ['시각화', 'plot', '차트', '그래프'])
-            
-            # =================================================================
-            # 질문 유형 선택 단계: 사용자가 제일 처음 선택
-            # =================================================================
-            from .classifier import generate_pre_question, PreQuestionChoice
-            
-            print(f"\n{generate_pre_question()}")
-            
-            # 사용자 선택 입력받기
-            while True:
-                user_choice = input("\n➡️ 선택 (1/2/3): ").strip()
-                
-                if not user_choice:
-                    print("⚠️ 선택을 입력해주세요 (1, 2, 또는 3)")
-                    continue
-                
-                # 유효성 검사 (1, 2, 3만 가능)
-                if user_choice not in ["1", "2", "3"]:
-                    print("⚠️ 인식 불가능한 선택입니다. 1, 2, 3 중 선택해주세요.")
-                    continue
-                
-                # 유효한 선택이면 그대로 사용 (파싱은 agent.chat에서)
-                query_choice = user_choice
-                break  # 유효한 선택 받음
             
             # =================================================================
             # 분석 단계: 선택된 유형에 따라 처리
@@ -576,6 +617,21 @@ def run_interactive_chat():
             # 오류 처리
             if response.error:
                 print(f"\n⚠️ 오류 발생: {response.error}")
+            
+            # =================================================================
+            # 다른 질문 여부 확인
+            # =================================================================
+            while True:
+                continue_chat = input("\n❓ 다른 질문을 하시겠습니까? (yes/no): ").strip().lower()
+                
+                if continue_chat in ["yes", "y", "네", "응", "ㅇ"]:
+                    break  # 다시 선질문으로
+                elif continue_chat in ["no", "n", "아니오", "아니", "ㄴ"]:
+                    print("👋 안녕히 가세요!")
+                    return  # 프로그램 종료
+                else:
+                    print("⚠️ 'yes' 또는 'no'로 입력해주세요.")
+                    continue
         
         except KeyboardInterrupt:
             print("\n👋 종료합니다.")
